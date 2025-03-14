@@ -1,0 +1,68 @@
+name: Image Import Request
+description: Request to import a container image from Docker Hub to GitHub Packages
+title: "[IMPORT] "
+labels: ["import-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Image Import Request
+        Please provide the details of the container image you'd like to import from Docker Hub to GitHub Packages.
+        
+        The workflow will automatically process this request and provide updates in the comments.
+  
+  - type: dropdown
+    id: source
+    attributes:
+      label: Image Source
+      description: Select the source registry from which to import the image
+      options:
+        - Docker Hub
+    validations:
+      required: true
+  
+  - type: input
+    id: repository
+    attributes:
+      label: Repository Name
+      description: The repository name where the image is located (e.g., library, bitnami)
+      placeholder: "library"
+    validations:
+      required: true
+  
+  - type: input
+    id: image
+    attributes:
+      label: Image Name
+      description: The name of the image to import
+      placeholder: "nginx"
+    validations:
+      required: true
+  
+  - type: input
+    id: version
+    attributes:
+      label: Image Version/Tag
+      description: The version or tag of the image to import (leave empty if using latest)
+      placeholder: "1.21.0"
+    validations:
+      required: false
+  
+  - type: checkbox
+    id: latest
+    attributes:
+      label: Use Latest Version
+      description: Check this box if you want to import the latest version
+      options:
+        - label: Import the latest version of this image
+  
+  - type: markdown
+    attributes:
+      value: |
+        ## Automated Process
+        
+        After submitting this request:
+        1. Our system will verify if the image already exists in GitHub Packages
+        2. If not, it will pull the image from Docker Hub
+        3. The image will be published to GitHub Packages with the naming pattern `dockerhub-<image>:<version>`
+        4. All steps will be logged in this issue for audit purposes

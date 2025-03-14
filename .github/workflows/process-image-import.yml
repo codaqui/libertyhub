@@ -1,0 +1,195 @@
+name: Process Image Import Request
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+jobs:
+  process-import-request:
+    if: contains(github.event.issue.labels.*.name, 'import-request')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract issue body
+        id: extract_data
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue
+            const body = issue.body
+            
+            // Parse the form data
+            const sourceMatch = body.match(/### Image Source\s*\n\s*(.*)/);
+            const repoMatch = body.match(/### Repository Name\s*\n\s*(.*)/);
+            const imageMatch = body.match(/### Image Name\s*\n\s*(.*)/);
+            const versionMatch = body.match(/### Image Version\/Tag\s*\n\s*(.*)/);
+            const useLatestMatch = body.match(/- \[(?:x|X)\] Import the latest version of this image/);
+            
+            const source = sourceMatch ? sourceMatch[1].trim() : null;
+            const repo = repoMatch ? repoMatch[1].trim() : null;
+            const image = imageMatch ? imageMatch[1].trim() : null;
+            const version = versionMatch ? versionMatch[1].trim() : null;
+            const useLatest = Boolean(useLatestMatch);
+            
+            const imageTag = useLatest || !version ? 'latest' : version;
+            
+            if (!source || !repo || !image) {
+              await github.rest.issues.createComment({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '⚠️ Error: Missing required information. Please make sure to provide source, repository name, and image name.'
+              });
+              
+              return core.setFailed('Missing required information');
+            }
+            
+            core.setOutput('source', source);
+            core.setOutput('repo', repo);
+            core.setOutput('image', image);
+            core.setOutput('version', imageTag);
+            
+            // Add comment about processing
+            await github.rest.issues.createComment({
+              issue_number: issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔄 Processing Import Request
+              
+              Processing request to import \`${repo}/${image}:${imageTag}\` from ${source}.
+              
+              - **Source**: ${source}
+              - **Repository**: ${repo}
+              - **Image**: ${image}
+              - **Version**: ${imageTag}
+              
+              Starting import process. Please wait...`
+            });
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+    #   - name: Login to DockerHub
+    #     uses: docker/login-action@v3
+    #     with:
+    #       username: ${{ secrets.DOCKERHUB_USERNAME }}
+    #       password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Pull and push image
+        id: docker_pull_push
+        env:
+          SOURCE_REPO: ${{ steps.extract_data.outputs.repo }}
+          IMAGE_NAME: ${{ steps.extract_data.outputs.image }}
+          IMAGE_VERSION: ${{ steps.extract_data.outputs.version }}
+        run: |
+          echo "::group::Import Process Details"
+          
+          SOURCE_IMAGE="${SOURCE_REPO}/${IMAGE_NAME}:${IMAGE_VERSION}"
+          TARGET_IMAGE="ghcr.io/${{ github.repository_owner }}/dockerhub-${IMAGE_NAME}:${IMAGE_VERSION}"
+          
+          echo "Source Image: ${SOURCE_IMAGE}"
+          echo "Target Image: ${TARGET_IMAGE}"
+          
+          # Check if target image already exists
+          if docker manifest inspect "${TARGET_IMAGE}" > /dev/null 2>&1; then
+            echo "::warning::Image ${TARGET_IMAGE} already exists in GitHub Packages"
+            echo "image_exists=true" >> $GITHUB_OUTPUT
+            echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Pull source image
+          echo "Pulling ${SOURCE_IMAGE}..."
+          docker pull "${SOURCE_IMAGE}"
+          
+          # Get image digest
+          SOURCE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${SOURCE_IMAGE}" | cut -d '@' -f 2)
+          echo "Source Image Digest: ${SOURCE_DIGEST}"
+          echo "source_digest=${SOURCE_DIGEST}" >> $GITHUB_OUTPUT
+          
+          # Tag image for GitHub Packages
+          docker tag "${SOURCE_IMAGE}" "${TARGET_IMAGE}"
+          
+          # Push to GitHub Packages
+          echo "Pushing to GitHub Packages as ${TARGET_IMAGE}..."
+          docker push "${TARGET_IMAGE}"
+          
+          # Get target image digest
+          TARGET_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${TARGET_IMAGE}" | cut -d '@' -f 2)
+          echo "Target Image Digest: ${TARGET_DIGEST}"
+          echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
+          echo "target_digest=${TARGET_DIGEST}" >> $GITHUB_OUTPUT
+          echo "image_exists=false" >> $GITHUB_OUTPUT
+          
+          echo "::endgroup::"
+      
+      - name: Update issue with results
+        uses: actions/github-script@v6
+        env:
+          IMAGE_EXISTS: ${{ steps.docker_pull_push.outputs.image_exists }}
+          TARGET_IMAGE: ${{ steps.docker_pull_push.outputs.target_image }}
+          SOURCE_DIGEST: ${{ steps.docker_pull_push.outputs.source_digest }}
+          TARGET_DIGEST: ${{ steps.docker_pull_push.outputs.target_digest }}
+        with:
+          script: |
+            const imageExists = process.env.IMAGE_EXISTS === 'true';
+            const targetImage = process.env.TARGET_IMAGE;
+            const sourceDigest = process.env.SOURCE_DIGEST;
+            const targetDigest = process.env.TARGET_DIGEST;
+            const workflowRunUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            let commentBody = '';
+            
+            if (imageExists) {
+              commentBody = `## ℹ️ Image Already Exists
+              
+              The requested image already exists in GitHub Packages.
+              
+              - **Image**: \`${targetImage}\`
+              - **Workflow Run**: [View Logs](${workflowRunUrl})
+              
+              You can use this image in your workflows or deployments.`;
+            } else {
+              commentBody = `## ✅ Import Complete
+              
+              Successfully imported the image to GitHub Packages.
+              
+              - **Image**: \`${targetImage}\`
+              - **Source Digest**: \`${sourceDigest}\`
+              - **Target Digest**: \`${targetDigest}\`
+              - **Workflow Run**: [View Logs](${workflowRunUrl})
+              - **Import Timestamp**: ${new Date().toISOString()}
+              - **Imported by**: @${context.actor}
+              
+              You can now use this image in your workflows or deployments.`;
+            }
+            
+            await github.rest.issues.createComment({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            });
+            
+            // Close the issue
+            await github.rest.issues.update({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              labels: imageExists ? ['import-request', 'duplicate', 'resolved'] : ['import-request', 'imported', 'resolved']
+            });
