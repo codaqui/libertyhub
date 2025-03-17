@@ -28,6 +28,17 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 
 ## Usage
 
+### Video
+
+<details>
+<summary>Click to watch the video instructions to new image import</summary>
+
+![New Image Video Tutorial](/assets/new-image.webm)
+</details>
+
+
+### Text
+
 1. Create a new issue using the "Image Import Request" template
 2. Fill in the required information:
    - Image source (select "Docker Hub" from dropdown)
