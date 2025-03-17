@@ -55,11 +55,13 @@ jobs:
             SPECIFIC_IMAGE="${SPECIFIC_IMAGE#dockerhub-}"
             
             echo "Processing specific image: ${SPECIFIC_IMAGE}"
+            API_URL="/orgs/${ORG}/packages/container/${PACKAGE_NAME}${SPECIFIC_IMAGE}"
+            echo "Querying: $API_URL"
             
             # Check if specific image exists in the registry
             if gh api \
               -H "Accept: application/vnd.github+json" \
-              "/orgs/${ORG}/packages/container/${PACKAGE_NAME}${SPECIFIC_IMAGE}" &>/dev/null; then
+              "${API_URL}" &>/dev/null; then
               IMAGES=("${SPECIFIC_IMAGE}")
               echo "Image ${SPECIFIC_IMAGE} found in registry, will update."
             else
