@@ -148,7 +148,7 @@ jobs:
               
               # Proceed with the update process - force pull the latest
               echo "Pulling latest ${SOURCE_IMAGE}..."
-              docker pull --no-cache "${SOURCE_IMAGE}"
+              docker pull "${SOURCE_IMAGE}"
             else
               # For non-latest images, we just mark as duplicate and exit
               echo "::warning::Image ${TARGET_IMAGE} already exists in GitHub Packages"
