@@ -28,10 +28,6 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 
 ## Usage
 
-### Video
-
-#TODO
-
 ### Text
 
 1. Create a new issue using the "Image Import Request" template
