@@ -80,7 +80,7 @@ jobs:
             echo "Fetching existing mirrored images from ghcr.io/${ORG}..."
             
             # Use GitHub CLI to list all packages starting with 'dockerhub-'
-            API_URL="/orgs/${ORG}/packages?package_type=container"
+            API_URL="/user/packages?package_type=container"
             echo "Querying: $API_URL"
             gh api "${API_URL}" > all_images.json
             
