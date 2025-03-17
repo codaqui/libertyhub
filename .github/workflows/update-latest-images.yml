@@ -1,4 +1,5 @@
 name: Update Latest Images
+run-name: ${{ github.event_name == 'schedule' && format('Daily Update [{0}]', github.run_number) || github.event.inputs.specific_image != '' && format('Update {0} [{1}]', github.event.inputs.specific_image, github.run_number) || format('Update All Images [{0}]', github.run_number) }}
 
 on:
   schedule:
@@ -12,7 +13,7 @@ on:
         default: false
         type: boolean
       specific_image:
-        description: 'Specific image to update (leave empty for all)'
+        description: 'Specific image to update (leave empty for all). No need to include dockerhub- prefix'
         required: false
         type: string
 
@@ -49,6 +50,10 @@ jobs:
           if [[ -n "${{ github.event.inputs.specific_image }}" ]]; then
             # If a specific image was requested
             SPECIFIC_IMAGE="${{ github.event.inputs.specific_image }}"
+            
+            # Strip dockerhub- prefix if user accidentally included it
+            SPECIFIC_IMAGE="${SPECIFIC_IMAGE#dockerhub-}"
+            
             echo "Processing specific image: ${SPECIFIC_IMAGE}"
             
             # Check if specific image exists in the registry
@@ -59,6 +64,7 @@ jobs:
               echo "Image ${SPECIFIC_IMAGE} found in registry, will update."
             else
               echo "Image ${SPECIFIC_IMAGE} not found in registry. Skipping update."
+              mkdir -p /tmp/libertyhub
               echo "[]" > /tmp/libertyhub/images_to_update.txt
               exit 0
             fi
