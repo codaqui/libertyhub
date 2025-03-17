@@ -59,10 +59,12 @@ jobs:
             echo "Querying: $API_URL"
             
             # Check if specific image exists in the registry
-            if gh api \
+            gh api \
               -H "Accept: application/vnd.github+json" \
-              "${API_URL}" &>/dev/null; then
-              IMAGES=("${SPECIFIC_IMAGE}")
+              "${API_URL}" > image_info.json
+            if [[ $? -eq 0 ]]; then
+              # Image exists
+              IMAGE_DIGEST=$(jq -r '.metadata.container.digest' image_info.json)
               echo "Image ${SPECIFIC_IMAGE} found in registry, will update."
             else
               echo "Image ${SPECIFIC_IMAGE} not found in registry. Skipping update."
