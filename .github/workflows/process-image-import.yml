@@ -31,30 +31,48 @@ jobs:
             const imageMatch = body.match(/### Image Name\s*\n\s*(.*)/);
             const versionMatch = body.match(/### Image Version\/Tag\s*\n\s*(.*)/);
             const useLatestMatch = body.match(/- \[(?:x|X)\] Import the latest version of this image/);
+            const isOfficialMatch = body.match(/- \[(?:x|X)\] This is an official Docker Hub image/);
             
             const source = sourceMatch ? sourceMatch[1].trim() : null;
             const repo = repoMatch ? repoMatch[1].trim() : null;
             const image = imageMatch ? imageMatch[1].trim() : null;
             const version = versionMatch ? versionMatch[1].trim() : null;
             const useLatest = Boolean(useLatestMatch);
+            const isOfficial = Boolean(isOfficialMatch);
             
             const imageTag = useLatest || !version ? 'latest' : version;
             
-            if (!source || !repo || !image) {
+            if (!source || !image) {
               await github.rest.issues.createComment({
                 issue_number: issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '⚠️ Error: Missing required information. Please make sure to provide source, repository name, and image name.'
+                body: '⚠️ Error: Missing required information. Please make sure to provide source and image name.'
               });
               
               return core.setFailed('Missing required information');
             }
             
+            // For non-official images, repository is required
+            if (!isOfficial && !repo) {
+              await github.rest.issues.createComment({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '⚠️ Error: Repository name is required for non-official images. If this is an official image, please check the "This is an official Docker Hub image" option.'
+              });
+              
+              return core.setFailed('Missing repository name for non-official image');
+            }
+            
             core.setOutput('source', source);
-            core.setOutput('repo', repo);
+            core.setOutput('repo', repo || 'library'); // For official images, use 'library' as repository
             core.setOutput('image', image);
             core.setOutput('version', imageTag);
+            core.setOutput('isOfficial', isOfficial);
+            
+            // Format the source image string based on whether it's an official image or not
+            const sourceImageDisplay = isOfficial ? `${image}:${imageTag}` : `${repo}/${image}:${imageTag}`;
             
             // Add comment about processing
             await github.rest.issues.createComment({
@@ -63,11 +81,11 @@ jobs:
               repo: context.repo.repo,
               body: `## 🔄 Processing Import Request
               
-              Processing request to import \`${repo}/${image}:${imageTag}\` from ${source}.
+              Processing request to import \`${sourceImageDisplay}\` from ${source}.
               
               - **Source**: ${source}
-              - **Repository**: ${repo}
-              - **Image**: ${image}
+              - **Image**: ${sourceImageDisplay}
+              - **Type**: ${isOfficial ? 'Official Image' : 'Repository Image'}
               - **Version**: ${imageTag}
               
               Starting import process. Please wait...`
@@ -95,10 +113,17 @@ jobs:
           SOURCE_REPO: ${{ steps.extract_data.outputs.repo }}
           IMAGE_NAME: ${{ steps.extract_data.outputs.image }}
           IMAGE_VERSION: ${{ steps.extract_data.outputs.version }}
+          IS_OFFICIAL: ${{ steps.extract_data.outputs.isOfficial }}
         run: |
           echo "::group::Import Process Details"
           
-          SOURCE_IMAGE="${SOURCE_REPO}/${IMAGE_NAME}:${IMAGE_VERSION}"
+          # Handle official images vs repository images
+          if [[ "$IS_OFFICIAL" == "true" ]]; then
+            SOURCE_IMAGE="${IMAGE_NAME}:${IMAGE_VERSION}"
+          else
+            SOURCE_IMAGE="${SOURCE_REPO}/${IMAGE_NAME}:${IMAGE_VERSION}"
+          fi
+          
           TARGET_IMAGE="ghcr.io/${{ github.repository_owner }}/dockerhub-${IMAGE_NAME}:${IMAGE_VERSION}"
           
           echo "Source Image: ${SOURCE_IMAGE}"
