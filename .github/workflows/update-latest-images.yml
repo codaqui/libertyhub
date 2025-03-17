@@ -1,0 +1,134 @@
+name: Update Latest Images
+
+on:
+  schedule:
+    # Run daily at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      force_update_all:
+        description: 'Force update all latest images'
+        required: false
+        default: false
+        type: boolean
+      specific_image:
+        description: 'Specific image to update (leave empty for all)'
+        required: false
+        type: string
+
+jobs:
+  find-and-update-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Find latest images
+        id: find_images
+        run: |
+          echo "::group::Finding Latest Images"
+          
+          # Get all images with 'latest' tag
+          PACKAGE_NAME="dockerhub-"
+          ORG="${{ github.repository_owner }}"
+          
+          if [[ -n "${{ github.event.inputs.specific_image }}" ]]; then
+            # If a specific image was requested
+            IMAGES=("${{ github.event.inputs.specific_image }}")
+            echo "Processing specific image: ${IMAGES[0]}"
+          else
+            # Get all images with 'latest' tag from GitHub Packages
+            echo "Fetching all latest images from ghcr.io/${ORG}..."
+            
+            # This lists all packages and filters for those with latest tag
+            # You'll need GitHub CLI installed or use GitHub API directly
+            IMAGES=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/orgs/${ORG}/packages/container/${PACKAGE_NAME}*/versions" | \
+              jq -r '.[] | select(.metadata.container.tags[] == "latest") | .name' | \
+              sed "s/^${PACKAGE_NAME}//" | sort -u || echo "")
+            
+            # Fallback if gh command fails or no images found
+            if [[ -z "$IMAGES" ]]; then
+              echo "::warning::Could not fetch images automatically. Will use Docker Hub official images as examples."
+              IMAGES=("nginx" "ubuntu" "python" "node")
+            fi
+          fi
+          
+          # Save images to a file for next step
+          mkdir -p /tmp/libertyhub
+          echo "${IMAGES[@]}" > /tmp/libertyhub/images_to_update.txt
+          
+          echo "Found ${#IMAGES[@]} images to update"
+          echo "Images: ${IMAGES[@]}"
+          echo "::endgroup::"
+      
+      - name: Update latest images
+        run: |
+          echo "::group::Updating Images"
+          
+          IMAGES=$(cat /tmp/libertyhub/images_to_update.txt)
+          ORG="${{ github.repository_owner }}"
+          UPDATED=0
+          SKIPPED=0
+          FAILED=0
+          
+          for IMAGE_NAME in $IMAGES; do
+            echo "Processing: $IMAGE_NAME"
+            
+            # Source image will be from Docker Hub
+            SOURCE_IMAGE="${IMAGE_NAME}:latest"
+            TARGET_IMAGE="ghcr.io/${ORG}/dockerhub-${IMAGE_NAME}:latest"
+            
+            echo "Pulling latest from Docker Hub: ${SOURCE_IMAGE}"
+            if docker pull "${SOURCE_IMAGE}"; then
+              # Get source digest
+              SOURCE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${SOURCE_IMAGE}" | cut -d '@' -f 2)
+              
+              # Tag for GitHub packages
+              docker tag "${SOURCE_IMAGE}" "${TARGET_IMAGE}"
+              
+              echo "Pushing to GitHub Packages as ${TARGET_IMAGE}"
+              if docker push "${TARGET_IMAGE}"; then
+                UPDATED=$((UPDATED+1))
+                TARGET_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${TARGET_IMAGE}" | cut -d '@' -f 2)
+                
+                echo "✅ Updated ${IMAGE_NAME}:latest"
+                echo "  Source Digest: ${SOURCE_DIGEST}"
+                echo "  Target Digest: ${TARGET_DIGEST}"
+              else
+                FAILED=$((FAILED+1))
+                echo "❌ Failed to push ${TARGET_IMAGE}"
+              fi
+            else
+              SKIPPED=$((SKIPPED+1))
+              echo "⚠️ Could not pull ${SOURCE_IMAGE}, skipping"
+            fi
+            
+            echo "-----------------------"
+          done
+          
+          echo "::endgroup::"
+          echo "Update Summary:"
+          echo "- Updated: $UPDATED"
+          echo "- Skipped: $SKIPPED"
+          echo "- Failed: $FAILED"
+          
+          # Set job status based on results
+          if [[ $FAILED -gt 0 ]]; then
+            exit 1
+          fi
