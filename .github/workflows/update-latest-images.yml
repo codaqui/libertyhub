@@ -68,6 +68,7 @@ jobs:
               # Image exists
               IMAGE_DIGEST=$(jq -r '.metadata.container.digest' image_info.json)
               echo "Image ${SPECIFIC_IMAGE} found in registry, will update."
+              export IMAGES="${SPECIFIC_IMAGE}"
             else
               echo "Image ${SPECIFIC_IMAGE} not found in registry. Skipping update."
               mkdir -p /tmp/libertyhub
@@ -75,9 +76,6 @@ jobs:
               exit 0
             fi
           else
-            # Authenticate GitHub CLI
-            echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-            
             # Get only existing dockerhub-* packages from GitHub Container Registry
             echo "Fetching existing mirrored images from ghcr.io/${ORG}..."
             
