@@ -21,14 +21,22 @@ body:
     validations:
       required: true
   
+  - type: checkboxes
+    id: official_image
+    attributes:
+      label: Official Image
+      description: Check this if the image is an official Docker Hub image (not in a repository)
+      options:
+        - label: This is an official Docker Hub image
+
   - type: input
     id: repository
     attributes:
       label: Repository Name
-      description: The repository name where the image is located (e.g., library, bitnami)
-      placeholder: "library"
+      description: The repository name where the image is located (e.g., bitnami). Leave empty for official images.
+      placeholder: "bitnami"
     validations:
-      required: true
+      required: false
   
   - type: input
     id: image
