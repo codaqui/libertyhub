@@ -16,6 +16,7 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 ## Features
 
 - **Source Selection**: Choose the image source (initially Docker Hub, with plans to expand)
+- **Support for Official Images**: Option to mark an image as an official Docker Hub image
 - **Simple Request Process**: Easy-to-use issue template with dropdown options
 - **Latest Version Support**: Option to select the latest version of an image
 - **Naming Convention**: Images are republished following the pattern `<source>-<image>:<version>`
@@ -27,7 +28,9 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 1. Create a new issue using the "Image Import Request" template
 2. Fill in the required information:
    - Image source (select "Docker Hub" from dropdown)
-   - Repository name
+   - Check "This is an official Docker Hub image" if applicable
+   - Repository name (leave empty for official images, e.g., nginx, ubuntu)
+   - Repository name (required for non-official images, e.g., bitnami)
    - Image name
    - Version (or check "Use latest")
 3. Submit the issue
