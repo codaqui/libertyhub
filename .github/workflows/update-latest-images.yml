@@ -36,6 +36,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install GitHub CLI
+        run: |
+          if ! command -v gh &> /dev/null; then
+            echo "Installing GitHub CLI..."
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh
+          fi
       
       - name: Find latest images
         id: find_images
@@ -48,39 +58,55 @@ jobs:
           
           if [[ -n "${{ github.event.inputs.specific_image }}" ]]; then
             # If a specific image was requested
-            IMAGES=("${{ github.event.inputs.specific_image }}")
-            echo "Processing specific image: ${IMAGES[0]}"
-          else
-            # Get all images with 'latest' tag from GitHub Packages
-            echo "Fetching all latest images from ghcr.io/${ORG}..."
+            SPECIFIC_IMAGE="${{ github.event.inputs.specific_image }}"
+            echo "Processing specific image: ${SPECIFIC_IMAGE}"
             
-            # This lists all packages and filters for those with latest tag
-            # You'll need GitHub CLI installed or use GitHub API directly
+            # Check if specific image exists in the registry
+            if gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/orgs/${ORG}/packages/container/${PACKAGE_NAME}${SPECIFIC_IMAGE}" &>/dev/null; then
+              IMAGES=("${SPECIFIC_IMAGE}")
+              echo "Image ${SPECIFIC_IMAGE} found in registry, will update."
+            else
+              echo "Image ${SPECIFIC_IMAGE} not found in registry. Skipping update."
+              echo "[]" > /tmp/libertyhub/images_to_update.txt
+              exit 0
+            fi
+          else
+            # Authenticate GitHub CLI
+            echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+            
+            # Get only existing dockerhub-* packages from GitHub Container Registry
+            echo "Fetching existing mirrored images from ghcr.io/${ORG}..."
+            
+            # Use GitHub CLI to list all packages starting with 'dockerhub-'
             IMAGES=$(gh api \
               -H "Accept: application/vnd.github+json" \
-              "/orgs/${ORG}/packages/container/${PACKAGE_NAME}*/versions" | \
-              jq -r '.[] | select(.metadata.container.tags[] == "latest") | .name' | \
+              "/orgs/${ORG}/packages?package_type=container" | \
+              jq -r '.[] | select(.name | startswith("dockerhub-")) | .name' | \
               sed "s/^${PACKAGE_NAME}//" | sort -u || echo "")
             
-            # Fallback if gh command fails or no images found
             if [[ -z "$IMAGES" ]]; then
-              echo "::warning::Could not fetch images automatically. Will use Docker Hub official images as examples."
-              IMAGES=("nginx" "ubuntu" "python" "node")
+              echo "No existing mirrored images found in GitHub Container Registry."
+              echo "No images to update."
+              mkdir -p /tmp/libertyhub
+              echo "[]" > /tmp/libertyhub/images_to_update.txt
+              exit 0
             fi
           fi
           
           # Save images to a file for next step
           mkdir -p /tmp/libertyhub
-          echo "${IMAGES[@]}" > /tmp/libertyhub/images_to_update.txt
+          printf "%s\n" "${IMAGES[@]}" > /tmp/libertyhub/images_to_update.txt
           
-          echo "Found ${#IMAGES[@]} images to update"
-          echo "Images: ${IMAGES[@]}"
+          echo "Found images to update: ${IMAGES[@]}"
           echo "::endgroup::"
       
       - name: Update latest images
         run: |
           echo "::group::Updating Images"
           
+          mkdir -p /tmp/libertyhub
           IMAGES=$(cat /tmp/libertyhub/images_to_update.txt)
           ORG="${{ github.repository_owner }}"
           UPDATED=0
