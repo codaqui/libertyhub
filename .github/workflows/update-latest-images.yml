@@ -80,11 +80,20 @@ jobs:
             echo "Fetching existing mirrored images from ghcr.io/${ORG}..."
             
             # Use GitHub CLI to list all packages starting with 'dockerhub-'
-            IMAGES=$(gh api \
+            API_URL="/orgs/${ORG}/packages?package_type=container"
+            echo "Querying: $API_URL"
+            gh api \
               -H "Accept: application/vnd.github+json" \
-              "/orgs/${ORG}/packages?package_type=container" | \
-              jq -r '.[] | select(.name | startswith("dockerhub-")) | .name' | \
-              sed "s/^${PACKAGE_NAME}//" | sort -u || echo "")
+              "${API_URL}" > all_images.json
+            
+            # Initialize IMAGES array
+            IMAGES=()
+            
+            # Extract all dockerhub packages in one jq command
+            mapfile -t IMAGES < <(jq -r '.packages[] | .name | select(startswith("dockerhub-")) | sub("^dockerhub-"; "")' all_images.json)
+            
+            # Verify we found images
+            echo "Found ${#IMAGES[@]} mirrored images to check for updates"
             
             if [[ -z "$IMAGES" ]]; then
               echo "No existing mirrored images found in GitHub Container Registry."
