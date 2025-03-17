@@ -70,6 +70,7 @@ jobs:
             core.setOutput('image', image);
             core.setOutput('version', imageTag);
             core.setOutput('isOfficial', isOfficial);
+            core.setOutput('useLatest', useLatest.toString());
             
             // Format the source image string based on whether it's an official image or not
             const sourceImageDisplay = isOfficial ? `${image}:${imageTag}` : `${repo}/${image}:${imageTag}`;
@@ -114,6 +115,7 @@ jobs:
           IMAGE_NAME: ${{ steps.extract_data.outputs.image }}
           IMAGE_VERSION: ${{ steps.extract_data.outputs.version }}
           IS_OFFICIAL: ${{ steps.extract_data.outputs.isOfficial }}
+          USE_LATEST: ${{ steps.extract_data.outputs.useLatest }}
         run: |
           echo "::group::Import Process Details"
           
@@ -131,15 +133,39 @@ jobs:
           
           # Check if target image already exists
           if docker manifest inspect "${TARGET_IMAGE}" > /dev/null 2>&1; then
-            echo "::warning::Image ${TARGET_IMAGE} already exists in GitHub Packages"
-            echo "image_exists=true" >> $GITHUB_OUTPUT
-            echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
-            exit 0
+            echo "Target image already exists in GitHub Packages"
+            
+            # If it's a 'latest' image, we should update it even if it exists
+            if [[ "$IMAGE_VERSION" == "latest" || "$USE_LATEST" == "true" ]]; then
+              echo "This is a 'latest' image request - updating the existing image"
+              echo "image_exists=true" >> $GITHUB_OUTPUT
+              echo "update_latest=true" >> $GITHUB_OUTPUT
+              echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
+              
+              # Get old digest before updating
+              OLD_TARGET_DIGEST=$(docker pull "${TARGET_IMAGE}" > /dev/null && docker inspect --format='{{index .RepoDigests 0}}' "${TARGET_IMAGE}" | cut -d '@' -f 2)
+              echo "old_target_digest=${OLD_TARGET_DIGEST}" >> $GITHUB_OUTPUT
+              
+              # Proceed with the update process - force pull the latest
+              echo "Pulling latest ${SOURCE_IMAGE}..."
+              docker pull --no-cache "${SOURCE_IMAGE}"
+            else
+              # For non-latest images, we just mark as duplicate and exit
+              echo "::warning::Image ${TARGET_IMAGE} already exists in GitHub Packages"
+              echo "image_exists=true" >> $GITHUB_OUTPUT
+              echo "update_latest=false" >> $GITHUB_OUTPUT
+              echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            # Image doesn't exist yet
+            echo "image_exists=false" >> $GITHUB_OUTPUT
+            echo "update_latest=false" >> $GITHUB_OUTPUT
+            
+            # Pull source image
+            echo "Pulling ${SOURCE_IMAGE}..."
+            docker pull "${SOURCE_IMAGE}"
           fi
-          
-          # Pull source image
-          echo "Pulling ${SOURCE_IMAGE}..."
-          docker pull "${SOURCE_IMAGE}"
           
           # Get image digest
           SOURCE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${SOURCE_IMAGE}" | cut -d '@' -f 2)
@@ -158,7 +184,6 @@ jobs:
           echo "Target Image Digest: ${TARGET_DIGEST}"
           echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
           echo "target_digest=${TARGET_DIGEST}" >> $GITHUB_OUTPUT
-          echo "image_exists=false" >> $GITHUB_OUTPUT
           
           echo "::endgroup::"
       
@@ -166,20 +191,26 @@ jobs:
         uses: actions/github-script@v6
         env:
           IMAGE_EXISTS: ${{ steps.docker_pull_push.outputs.image_exists }}
+          UPDATE_LATEST: ${{ steps.docker_pull_push.outputs.update_latest }}
           TARGET_IMAGE: ${{ steps.docker_pull_push.outputs.target_image }}
           SOURCE_DIGEST: ${{ steps.docker_pull_push.outputs.source_digest }}
           TARGET_DIGEST: ${{ steps.docker_pull_push.outputs.target_digest }}
+          OLD_TARGET_DIGEST: ${{ steps.docker_pull_push.outputs.old_target_digest }}
         with:
           script: |
             const imageExists = process.env.IMAGE_EXISTS === 'true';
+            const updateLatest = process.env.UPDATE_LATEST === 'true';
             const targetImage = process.env.TARGET_IMAGE;
             const sourceDigest = process.env.SOURCE_DIGEST;
             const targetDigest = process.env.TARGET_DIGEST;
+            const oldTargetDigest = process.env.OLD_TARGET_DIGEST;
             const workflowRunUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             
             let commentBody = '';
+            let labels = [];
             
-            if (imageExists) {
+            if (imageExists && !updateLatest) {
+              // Regular duplicate image case - no update needed
               commentBody = `## ℹ️ Image Already Exists
               
               The requested image already exists in GitHub Packages.
@@ -188,7 +219,27 @@ jobs:
               - **Workflow Run**: [View Logs](${workflowRunUrl})
               
               You can use this image in your workflows or deployments.`;
+              
+              labels = ['import-request', 'duplicate', 'resolved'];
+            } else if (imageExists && updateLatest) {
+              // Latest image was updated
+              commentBody = `## 🔄 Latest Image Updated
+              
+              Successfully updated the latest image in GitHub Packages.
+              
+              - **Image**: \`${targetImage}\`
+              - **Previous Digest**: \`${oldTargetDigest}\`
+              - **Source Digest**: \`${sourceDigest}\`
+              - **New Target Digest**: \`${targetDigest}\`
+              - **Workflow Run**: [View Logs](${workflowRunUrl})
+              - **Update Timestamp**: ${new Date().toISOString()}
+              - **Updated by**: @${context.actor}
+              
+              You can now use this updated image in your workflows or deployments.`;
+              
+              labels = ['import-request', 'updated-latest', 'resolved'];
             } else {
+              // New image was imported
               commentBody = `## ✅ Import Complete
               
               Successfully imported the image to GitHub Packages.
@@ -201,6 +252,8 @@ jobs:
               - **Imported by**: @${context.actor}
               
               You can now use this image in your workflows or deployments.`;
+              
+              labels = ['import-request', 'imported', 'resolved'];
             }
             
             await github.rest.issues.createComment({
@@ -210,11 +263,11 @@ jobs:
               body: commentBody
             });
             
-            // Close the issue
+            // Close the issue with appropriate labels
             await github.rest.issues.update({
               issue_number: context.payload.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'closed',
-              labels: imageExists ? ['import-request', 'duplicate', 'resolved'] : ['import-request', 'imported', 'resolved']
+              labels: labels
             });
