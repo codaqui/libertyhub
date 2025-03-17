@@ -21,6 +21,7 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 - **Support for Official Images**: Option to mark an image as an official Docker Hub image
 - **Simple Request Process**: Easy-to-use issue template with dropdown options
 - **Latest Version Support**: Option to select the latest version of an image
+- **Automatic Updates**: For images marked as "latest", duplicate requests will trigger an update
 - **Naming Convention**: Images are republished following the pattern `<source>-<image>:<version>`
 - **Complete Audit Trail**: All actions are logged, including image hashes, versions, and workflow details
 - **Duplicate Prevention**: System verifies if the requested image already exists before processing
@@ -39,6 +40,14 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 4. The workflow will process your request automatically and provide updates in the issue comments
 5. Once completed, the image will be available in GitHub Packages with the naming convention `dockerhub-<image>:<version>`
 
+### Keeping Latest Images Updated
+
+To update an image tagged as "latest" to the newest version available:
+1. Simply create a new image import request with the same image details
+2. Check the "Use latest" option
+3. Submit the issue
+4. The system will detect it's a duplicate request for a "latest" image and automatically update it
+
 ## Audit Information
 
 Each image import includes the following audit information:
@@ -48,6 +57,12 @@ Each image import includes the following audit information:
 - Timestamp of import
 - GitHub Actions workflow run ID and logs
 - User who initiated the request
+
+For updated "latest" images, additional audit information includes:
+- Previous image digest
+- New image digest
+- Update timestamp
+- User who initiated the update
 
 ## Contributing
 
