@@ -30,15 +30,7 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 
 ### Video
 
-<details>
-<summary>Click to watch the video instructions to new image import</summary>
-
-<video width="100%" controls>
-   <source src="/assets/new-image.webm" type="video/webm">
-   Your browser does not support the video tag.
-</video>
-</details>
-
+#TODO
 
 ### Text
 
