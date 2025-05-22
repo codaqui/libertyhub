@@ -41,6 +41,8 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Update each 'latest' image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for image in ${{ steps.list_latest_images.outputs.images }}; do
             echo "Processing image: $image"
