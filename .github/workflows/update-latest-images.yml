@@ -33,7 +33,8 @@ jobs:
         run: |
           # List all container packages in the organization
           echo "Trying to list packages..."
-          ghcr_images=$(gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "/orgs/codaqui/packages?package_type=container" --paginate | jq -r '.[] | select(.name | contains("dockerhub-")) | .name')
+          gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "/orgs/codaqui/packages?package_type=container" > packages.json
+          echo "Packages: $(cat packages.json)"
           echo "Found images: $ghcr_images"
           echo "images<<EOF" >> $GITHUB_OUTPUT
           echo "$ghcr_images" >> $GITHUB_OUTPUT
