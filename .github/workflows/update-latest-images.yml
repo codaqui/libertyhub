@@ -32,7 +32,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # List all images tagged with 'latest' in the repository
-          ghcr_images=$(gh api -H "Accept: application/vnd.github.v3+json" /user/packages/container | jq -r '.[] | select(.name | contains("dockerhub-")) | .name')
+          # Using the correct API endpoint for organization packages
+          ghcr_images=$(gh api \
+            -H "Accept: application/vnd.github.v3+json" \
+            /orgs/${{ github.repository_owner }}/packages/container?package_type=container | \
+            jq -r '.[] | select(.name | contains("dockerhub-")) | .name')
           echo "Found images: $ghcr_images"
           echo "images<<EOF" >> $GITHUB_OUTPUT
           echo "$ghcr_images" >> $GITHUB_OUTPUT
