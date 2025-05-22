@@ -58,9 +58,9 @@ jobs:
             docker pull "docker.io/$image:latest"
 
             # Tag the image for GitHub Packages
-            docker tag "docker.io/$image:latest" "ghcr.io/${{ github.repository_owner }}/$image:latest"
+            image_name_push="dockerhub-$image"
+            docker tag "docker.io/$image:latest" "ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
 
             # Push the image to GitHub Packages
-            image_name_push="dockerhub-$image"
             docker push "ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
           done
