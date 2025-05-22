@@ -50,6 +50,10 @@ To update an image tagged as "latest" to the newest version available:
 3. Submit the issue
 4. The system will detect it's a duplicate request for a "latest" image and automatically update it
 
+### Scheduled Updates for Latest Images
+
+A scheduled workflow has been added to automatically update all images tagged with 'latest' on a daily basis. This ensures that the latest images are always up-to-date without requiring manual intervention. Additionally, you can manually trigger the workflow using the `workflow_dispatch` event for immediate synchronization.
+
 ## Audit Information
 
 Each image import includes the following audit information:
