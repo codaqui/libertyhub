@@ -1,0 +1,50 @@
+name: Update Latest Images
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight
+  workflow_dispatch:
+
+jobs:
+  update-latest-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List all images tagged with 'latest'
+        id: list_latest_images
+        run: |
+          # List all images tagged with 'latest' in the repository
+          ghcr_images=$(gh api -H "Accept: application/vnd.github.v3+json" /user/packages/container | jq -r '.[] | select(.name | contains("dockerhub-")) | .name')
+          echo "Found images: $ghcr_images"
+          echo "images=$ghcr_images" >> $GITHUB_ENV
+
+      - name: Update each 'latest' image
+        run: |
+          for image in ${{ env.images }}; do
+            echo "Processing image: $image"
+
+            # Pull the latest image from Docker Hub
+            docker pull "docker.io/$image:latest"
+
+            # Tag the image for GitHub Packages
+            docker tag "docker.io/$image:latest" "ghcr.io/${{ github.repository_owner }}/$image:latest"
+
+            # Push the image to GitHub Packages
+            docker push "ghcr.io/${{ github.repository_owner }}/$image:latest"
+          done
