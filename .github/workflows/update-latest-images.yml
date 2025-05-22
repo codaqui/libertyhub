@@ -50,6 +50,10 @@ jobs:
           for image in "${images[@]}"; do
             echo "Processing image: $image"
 
+            # Remove the 'dockerhub-' prefix from the image name
+            image=${image#dockerhub-}
+            echo "Image name without prefix: $image"
+
             # Pull the latest image from Docker Hub
             docker pull "docker.io/$image:latest"
 
