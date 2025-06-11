@@ -254,7 +254,7 @@ jobs:
               if docker tag "docker.io/$clean_image:latest" "$ghcr_tag" >/dev/null 2>&1; then
                 # Get image info before push
                 echo "📊 Image info before push:"
-                docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ImageID}}\t{{.CreatedAt}}\t{{.Size}}" | grep -E "(REPOSITORY|$clean_image)" || echo "No matching images found"
+                docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}" | grep -E "(REPOSITORY|$clean_image)" || echo "No matching images found"
                 
                 # Push the image to GitHub Packages
                 echo "📤 Pushing to GitHub Container Registry..."
