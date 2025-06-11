@@ -1,15 +1,24 @@
-name: Image Import Request
+name: 🐳 Image Import Request
 description: Request to import a container image from Docker Hub to GitHub Packages
-title: "[IMPORT] "
+title: "[IMPORT] <image-name>"
 labels: ["import-request"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## Image Import Request
+        ## 🐳 Image Import Request
         Please provide the details of the container image you'd like to import from Docker Hub to GitHub Packages.
         
         The workflow will automatically process this request and provide updates in the comments.
+        
+        ### 🏷️ Naming Convention
+        - **Official images**: `ghcr.io/codaqui/dockerhub-<image>:<version>`
+        - **Organization images**: `ghcr.io/codaqui/dockerhub-<org>-<image>:<version>`
+        
+        ### ⚠️ Important Limitations
+        - **Organization names with hyphens are NOT supported** (e.g., `docker-compose/nginx`)
+        - This prevents naming conflicts in our automated update system
+        - Use official images or organizations without hyphens when possible
   
   - type: dropdown
     id: source
@@ -32,8 +41,8 @@ body:
   - type: input
     id: repository
     attributes:
-      label: Repository Name
-      description: The repository name where the image is located (e.g., bitnami). Leave empty for official images.
+      label: Repository/Organization Name
+      description: The repository or organization name where the image is located (e.g., bitnami, microsoft, homeassistant). Leave empty for official images. ⚠️ Names with hyphens are NOT supported.
       placeholder: "bitnami"
     validations:
       required: false
@@ -42,7 +51,7 @@ body:
     id: image
     attributes:
       label: Image Name
-      description: The name of the image to import
+      description: The name of the image to import (e.g., nginx, postgres, redis)
       placeholder: "nginx"
     validations:
       required: true
@@ -51,7 +60,7 @@ body:
     id: version
     attributes:
       label: Image Version/Tag
-      description: The version or tag of the image to import (leave empty if using latest)
+      description: The specific version or tag of the image to import (e.g., 1.21.0, 2.4-alpine). Leave empty if using latest version.
       placeholder: "1.21.0"
     validations:
       required: false
@@ -60,17 +69,26 @@ body:
     id: latest
     attributes:
       label: Use Latest Version
-      description: Check this box if you want to import the latest version
+      description: Check this box if you want to import the latest version (enables automatic updates)
       options:
-        - label: Import the latest version of this image
+        - label: Import the latest version of this image (recommended for most use cases)
   
   - type: markdown
     attributes:
       value: |
-        ## Automated Process
+        ## 🤖 Automated Process
         
         After submitting this request:
-        1. Our system will verify if the image already exists in GitHub Packages
-        2. If not, it will pull the image from Docker Hub
-        3. The image will be published to GitHub Packages with the naming pattern `dockerhub-<image>:<version>`
-        4. All steps will be logged in this issue for audit purposes
+        1. ✅ **Validation**: System checks for naming conflicts and invalid organization names
+        2. 🔍 **Duplicate Check**: Verifies if the image already exists in GitHub Packages
+        3. 📥 **Download**: Pulls the image from Docker Hub with verification
+        4. 🏷️ **Tagging**: Applies proper naming convention based on image type
+        5. 📤 **Publish**: Uploads to GitHub Packages with audit trail
+        6. 📊 **Logging**: All steps are documented in this issue for transparency
+        
+        ### 📋 Examples
+        - **Official**: `nginx:latest` → `ghcr.io/codaqui/dockerhub-nginx:latest`
+        - **Organization**: `bitnami/nginx:1.21` → `ghcr.io/codaqui/dockerhub-bitnami-nginx:1.21`
+        
+        ### 🔄 Automatic Updates
+        Images marked as "latest" will be automatically updated daily by our maintenance workflow.
