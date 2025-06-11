@@ -177,15 +177,56 @@ jobs:
               fi
               echo "🔐 Source image hash: $source_hash"
               
-              # Tag the image for GitHub Packages
+              # Check if we already have this image in GHCR to avoid unnecessary pushes
               image_name_push="dockerhub-$clean_image"
               ghcr_tag="ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
               
+              echo "🔍 Checking if image already exists in GHCR..."
+              existing_hash=""
+              if docker manifest inspect "$ghcr_tag" >/dev/null 2>&1; then
+                # Try to get the existing image
+                if docker pull "$ghcr_tag" >/dev/null 2>&1; then
+                  existing_hash=$(docker inspect "$ghcr_tag" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
+                  echo "📦 Existing GHCR image hash: $existing_hash"
+                  
+                  if [ "$source_hash" = "$existing_hash" ]; then
+                    echo "✅ Image is already up-to-date in GHCR (same hash)"
+                    echo "🏷️  Re-tagging to update metadata..."
+                  else
+                    echo "🔄 Image has changed, update needed"
+                    echo "   Source: $source_hash"
+                    echo "   GHCR:   $existing_hash"
+                  fi
+                else
+                  echo "⚠️  Could not pull existing image for comparison"
+                fi
+              else
+                echo "📦 Image does not exist in GHCR yet"
+              fi
+              
+              # Tag the image for GitHub Packages
+              
               echo "🏷️  Tagging for GHCR: $ghcr_tag"
               if docker tag "docker.io/$clean_image:latest" "$ghcr_tag" >/dev/null 2>&1; then
+                # Get image info before push
+                echo "📊 Image info before push:"
+                docker images --format "table {{.Repository}}:{{.Tag}}\t{{.ImageID}}\t{{.CreatedAt}}\t{{.Size}}" | grep -E "(REPOSITORY|$clean_image)" || echo "No matching images found"
+                
                 # Push the image to GitHub Packages
                 echo "📤 Pushing to GitHub Container Registry..."
-                if docker push "$ghcr_tag" >/dev/null 2>&1; then
+                push_start_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                if docker push "$ghcr_tag" 2>&1 | tee push_output.log; then
+                  push_end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                  echo "✅ Push completed at $push_end_time"
+                  
+                  # Verify the push was successful by checking the registry
+                  echo "🔍 Verifying push to registry..."
+                  if docker manifest inspect "$ghcr_tag" >/dev/null 2>&1; then
+                    echo "✅ Image verified in registry"
+                  else
+                    echo "⚠️  Warning: Could not verify image in registry"
+                  fi
+                  
                   # Get pushed image hash
                   pushed_hash=$(docker inspect "$ghcr_tag" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
                   if [ -z "$pushed_hash" ]; then
@@ -193,6 +234,24 @@ jobs:
                   fi
                   echo "✅ Successfully pushed to GHCR"
                   echo "🔐 Pushed image hash: $pushed_hash"
+                  echo "⏱️  Push duration: $push_start_time to $push_end_time"
+                  
+                  # Show push output summary
+                  if [ -f push_output.log ]; then
+                    echo "📋 Push summary:"
+                    grep -E "(Pushed|Already exists|Layer already exists)" push_output.log || echo "No layer information found"
+                    rm -f push_output.log
+                  fi
+                  
+                  # Final verification - check if timestamp updated
+                  echo "🕐 Final verification of update..."
+                  if command -v gh >/dev/null 2>&1; then
+                    echo "📊 Checking package information via GitHub API..."
+                    gh api -H "Accept: application/vnd.github+json" \
+                      "/orgs/${{ github.repository_owner }}/packages/container/$image_name_push" \
+                      --jq '.updated_at' 2>/dev/null | head -1 | \
+                      xargs -I {} echo "🕐 Package last updated: {}" || echo "⚠️  Could not fetch package metadata"
+                  fi
                   
                   successful_images+=("$clean_image")
                   image_hashes+=("$clean_image:$source_hash->$pushed_hash")
@@ -266,6 +325,14 @@ jobs:
           echo "✅ Successful: $success_count"
           echo "❌ Failed: $failed_count"
           echo "📋 Total: $total_images"
+          echo ""
+          echo "🔍 Diagnostic Information:"
+          echo "- If 'Last published' shows old dates, it might be because:"
+          echo "  1. Images are identical (same hash, no real update needed)"
+          echo "  2. GitHub Container Registry UI cache"
+          echo "  3. Push succeeded but metadata not refreshed"
+          echo "- Check the detailed logs above for hash comparisons"
+          echo "- Look for 'Layer already exists' vs 'Pushed' messages"
           echo "::endgroup::"
           
           # Exit with success even if some images failed
