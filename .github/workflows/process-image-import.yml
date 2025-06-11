@@ -37,19 +37,31 @@ jobs:
             const body = issue.body
             
             console.log('::group::🔍 Parsing issue data')
+            console.log('📄 Issue body:', body);
+            console.log('::endgroup::')
+            console.log('::group::📊 Regex matches')
             
             // Parse the form data
             const sourceMatch = body.match(/### Image Source\s*\n\s*(.*)/);
-            const repoMatch = body.match(/### Repository Name\s*\n\s*(.*)/);
+            const repoMatch = body.match(/### Repository\/Organization Name\s*\n\s*(.*)/);
             const imageMatch = body.match(/### Image Name\s*\n\s*(.*)/);
             const versionMatch = body.match(/### Image Version\/Tag\s*\n\s*(.*)/);
-            const useLatestMatch = body.match(/- \[(?:x|X)\] Import the latest version of this image/);
+            const useLatestMatch = body.match(/- \[(?:x|X)\] Import the latest version of this image \(recommended for most use cases\)/);
             const isOfficialMatch = body.match(/- \[(?:x|X)\] This is an official Docker Hub image/);
             
+            console.log('🔍 Raw matches:', {
+              sourceMatch: sourceMatch ? sourceMatch[1] : null,
+              repoMatch: repoMatch ? repoMatch[1] : null,
+              imageMatch: imageMatch ? imageMatch[1] : null,
+              versionMatch: versionMatch ? versionMatch[1] : null,
+              useLatestMatch: Boolean(useLatestMatch),
+              isOfficialMatch: Boolean(isOfficialMatch)
+            });
+            
             const source = sourceMatch ? sourceMatch[1].trim() : null;
-            const repo = repoMatch ? repoMatch[1].trim() : null;
+            const repo = repoMatch && repoMatch[1].trim() !== '' ? repoMatch[1].trim() : null;
             const image = imageMatch ? imageMatch[1].trim() : null;
-            const version = versionMatch ? versionMatch[1].trim() : null;
+            const version = versionMatch && versionMatch[1].trim() !== '' ? versionMatch[1].trim() : null;
             const useLatest = Boolean(useLatestMatch);
             const isOfficial = Boolean(isOfficialMatch);
             
@@ -89,7 +101,16 @@ jobs:
                 issue_number: issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '❌ **Error: Repository name required**\n\nRepository name is required for non-official images. If this is an official image, please check the "This is an official Docker Hub image" option.'
+                body: '❌ **Error: Repository/Organization name required**\\n\\n' +
+                      '**Issue**: Repository/Organization name is required for non-official images.\\n\\n' +
+                      '**Solutions**:\\n' +
+                      '1. Fill in the "Repository/Organization Name" field (e.g., "jetbrains" for jetbrains/code-with-me-relay)\\n' +
+                      '2. OR check the "This is an official Docker Hub image" option if this image doesn\\'t belong to an organization\\n\\n' +
+                      '**Detected values**:\\n' +
+                      '- Image Source: `' + (source || 'not detected') + '`\\n' +
+                      '- Repository/Organization Name: `' + (repo || 'empty/not detected') + '`\\n' +
+                      '- Image Name: `' + (image || 'not detected') + '`\\n' +
+                      '- Is Official Image: `' + isOfficial + '`'
               });
               
               await github.rest.issues.addLabels({
