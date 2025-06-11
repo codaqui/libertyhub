@@ -1,12 +1,12 @@
-name: Process Image Import Request
+name: 🚀 Process Image Import Request
 
 on:
   issues:
-    types: [opened, edited, labeled]
+    types: [opened, labeled]  # Removed 'edited' to prevent duplicates
 
 jobs:
   process-import-request:
-    if: contains(github.event.issue.labels.*.name, 'import-request')
+    if: contains(github.event.issue.labels.*.name, 'import-request') && !contains(github.event.issue.labels.*.name, 'processing')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -14,16 +14,29 @@ jobs:
       packages: write
     
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: Extract issue body
+      - name: 🏷️ Mark issue as processing
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['processing']
+            });
+
+      - name: 📋 Extract issue data
         id: extract_data
         uses: actions/github-script@v6
         with:
           script: |
             const issue = context.payload.issue
             const body = issue.body
+            
+            console.log('::group::🔍 Parsing issue data')
             
             // Parse the form data
             const sourceMatch = body.match(/### Image Source\s*\n\s*(.*)/);
@@ -42,12 +55,29 @@ jobs:
             
             const imageTag = useLatest || !version ? 'latest' : version;
             
+            console.log('📊 Parsed data:', {
+              source,
+              repo,
+              image,
+              version: imageTag,
+              useLatest,
+              isOfficial
+            })
+            console.log('::endgroup::')
+            
             if (!source || !image) {
               await github.rest.issues.createComment({
                 issue_number: issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '⚠️ Error: Missing required information. Please make sure to provide source and image name.'
+                body: '❌ **Error: Missing required information**\n\nPlease make sure to provide source and image name.'
+              });
+              
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['invalid']
               });
               
               return core.setFailed('Missing required information');
@@ -59,14 +89,21 @@ jobs:
                 issue_number: issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '⚠️ Error: Repository name is required for non-official images. If this is an official image, please check the "This is an official Docker Hub image" option.'
+                body: '❌ **Error: Repository name required**\n\nRepository name is required for non-official images. If this is an official image, please check the "This is an official Docker Hub image" option.'
+              });
+              
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['invalid']
               });
               
               return core.setFailed('Missing repository name for non-official image');
             }
             
             core.setOutput('source', source);
-            core.setOutput('repo', repo || 'library'); // For official images, use 'library' as repository
+            core.setOutput('repo', repo || 'library');
             core.setOutput('image', image);
             core.setOutput('version', imageTag);
             core.setOutput('isOfficial', isOfficial);
@@ -75,49 +112,53 @@ jobs:
             // Format the source image string based on whether it's an official image or not
             const sourceImageDisplay = isOfficial ? `${image}:${imageTag}` : `${repo}/${image}:${imageTag}`;
             
-            // Add comment about processing
+            core.setOutput('sourceImageDisplay', sourceImageDisplay);
+            
+            // Add initial processing comment
             await github.rest.issues.createComment({
               issue_number: issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `## 🔄 Processing Import Request
               
-              Processing request to import \`${sourceImageDisplay}\` from ${source}.
+              📋 **Request Details:**
+              - **Source:** ${source}
+              - **Image:** \`${sourceImageDisplay}\`
+              - **Type:** ${isOfficial ? '📦 Official Image' : '🏢 Repository Image'}
+              - **Version:** \`${imageTag}\`
               
-              - **Source**: ${source}
-              - **Image**: ${sourceImageDisplay}
-              - **Type**: ${isOfficial ? 'Official Image' : 'Repository Image'}
-              - **Version**: ${imageTag}
-              
-              Starting import process. Please wait...`
+              🚀 Starting import process. Please wait...`
             });
-      
-      - name: Set up Docker Buildx
+
+      - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
-    #   - name: Login to DockerHub
-    #     uses: docker/login-action@v3
-    #     with:
-    #       username: ${{ secrets.DOCKERHUB_USERNAME }}
-    #       password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Login to GitHub Container Registry
+
+      - name: 🔐 Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Pull and push image
+
+      - name: 🐳 Pull and push image
         id: docker_pull_push
+        continue-on-error: true
         env:
           SOURCE_REPO: ${{ steps.extract_data.outputs.repo }}
           IMAGE_NAME: ${{ steps.extract_data.outputs.image }}
           IMAGE_VERSION: ${{ steps.extract_data.outputs.version }}
           IS_OFFICIAL: ${{ steps.extract_data.outputs.isOfficial }}
           USE_LATEST: ${{ steps.extract_data.outputs.useLatest }}
+          SOURCE_IMAGE_DISPLAY: ${{ steps.extract_data.outputs.sourceImageDisplay }}
         run: |
-          echo "::group::Import Process Details"
+          set +e  # Disable exit on error
+          
+          # Initialize audit file
+          audit_file="image_import_audit_$(date +%Y%m%d_%H%M%S).json"
+          echo "📝 Creating audit file: $audit_file"
+          echo '{"timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "workflow_run": "'${{ github.run_id }}'", "request": {"source": "'$SOURCE_IMAGE_DISPLAY'", "target": "", "status": "processing"}}' > "$audit_file"
+          
+          echo "::group::🔍 Import Process Details"
           
           # Handle official images vs repository images
           if [[ "$IS_OFFICIAL" == "true" ]]; then
@@ -126,136 +167,573 @@ jobs:
             SOURCE_IMAGE="${SOURCE_REPO}/${IMAGE_NAME}:${IMAGE_VERSION}"
           fi
           
-          TARGET_IMAGE="ghcr.io/${{ github.repository_owner }}/dockerhub-${IMAGE_NAME}:${IMAGE_VERSION}"
+          # Determine correct target naming with improved conflict resolution
+          # For organization/repo images, we want to include the org to avoid conflicts
+          if [[ "$SOURCE_IMAGE" == *"/"* ]] && [[ "$IS_OFFICIAL" != "true" ]]; then
+            # For non-official images, include organization to avoid conflicts
+            # Example: bitnami/nginx -> dockerhub-bitnami-nginx
+            
+            # IMPORTANT: Check for hyphen in organization name (incompatible)
+            if [[ "$SOURCE_REPO" == *"-"* ]]; then
+              echo "❌ **ERROR: Organization name contains hyphen**"
+              echo ""
+              echo "Organization: \`$SOURCE_REPO\`"
+              echo "Image: \`$IMAGE_NAME\`"
+              echo ""
+              echo "**Issue**: Organization names with hyphens are not supported due to naming conflicts in the \`dockerhub-<org>-<image>\` pattern."
+              echo ""
+              echo "**Recommended Solutions:**"
+              echo "1. Use the full image name format: \`$SOURCE_REPO/$IMAGE_NAME\`"
+              echo "2. Contact the repository maintainer to discuss alternatives"
+              echo ""
+              echo "**Technical Details:**"
+              echo "- Target pattern would be: \`dockerhub-$SOURCE_REPO-$IMAGE_NAME\`"
+              echo "- This creates ambiguity in reverse mapping for automatic updates"
+              echo "- Current system prioritizes reliable automation over edge case support"
+              
+              await github.rest.issues.createComment({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '❌ **Error: Organization name with hyphen not supported**\\n\\n' +
+                      '**Organization**: `' + process.env.SOURCE_REPO + '`\\n' +
+                      '**Image**: `' + process.env.IMAGE_NAME + '`\\n\\n' +
+                      '**Issue**: Organization names with hyphens are not supported due to naming conflicts in the `dockerhub-<org>-<image>` pattern.\\n\\n' +
+                      '**Recommended Solutions:**\\n' +
+                      '1. Use official images when possible\\n' +
+                      '2. Choose organizations without hyphens in the name\\n' +
+                      '3. Contact maintainers for alternative solutions\\n\\n' +
+                      '**Technical Details:**\\n' +
+                      '- Target would be: `dockerhub-' + process.env.SOURCE_REPO + '-' + process.env.IMAGE_NAME + '`\\n' +
+                      '- This creates ambiguity in reverse mapping for automatic updates\\n' +
+                      '- System prioritizes reliable automation over edge case support'
+              });
+              
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['invalid', 'naming-conflict']
+              });
+              
+              return core.setFailed('Organization name contains hyphen - not supported');
+            fi
+            
+            ORG_NAME=$(echo "$SOURCE_REPO" | sed 's/[^a-zA-Z0-9._]/-/g')
+            CLEAN_IMAGE_NAME=$(echo "$IMAGE_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            
+            # Additional safety: ensure we don't have empty names
+            if [[ -z "$CLEAN_IMAGE_NAME" ]]; then
+              echo "⚠️  Warning: Empty image name after extraction, using full image name"
+              CLEAN_IMAGE_NAME="$IMAGE_NAME"
+            fi
+            if [[ -z "$ORG_NAME" ]]; then
+              echo "⚠️  Warning: Empty org name, using repo name"
+              ORG_NAME="$SOURCE_REPO"
+            fi
+            
+            TARGET_IMAGE="ghcr.io/${{ github.repository_owner }}/dockerhub-${ORG_NAME}-${CLEAN_IMAGE_NAME}:${IMAGE_VERSION}"
+            
+            # Store detailed mapping for audit and future reference  
+            IMAGE_MAPPING='{"source_pattern": "'$SOURCE_IMAGE'", "target_pattern": "dockerhub-'$ORG_NAME'-'$CLEAN_IMAGE_NAME'", "mapping_type": "org_image_combination", "original_repo": "'$SOURCE_REPO'", "original_image": "'$IMAGE_NAME'", "org_name": "'$ORG_NAME'", "image_name": "'$CLEAN_IMAGE_NAME'", "created": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "notes": "Combined org and image name to avoid conflicts"}'
+            echo "🗂️  Image mapping (org+image): $IMAGE_MAPPING"
+          else
+            # Standard naming for official images or simple names
+            # Sanitize the name for safety
+            SANITIZED_NAME=$(echo "$IMAGE_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            TARGET_IMAGE="ghcr.io/${{ github.repository_owner }}/dockerhub-${SANITIZED_NAME}:${IMAGE_VERSION}"
+            IMAGE_MAPPING='{"source_pattern": "'$SOURCE_IMAGE'", "target_pattern": "dockerhub-'$SANITIZED_NAME'", "mapping_type": "standard", "original_image": "'$IMAGE_NAME'", "sanitized_name": "'$SANITIZED_NAME'", "created": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "notes": "Standard naming pattern for official or simple images"}'
+            echo "🗂️  Image mapping (standard): $IMAGE_MAPPING"
+          fi
           
-          echo "Source Image: ${SOURCE_IMAGE}"
-          echo "Target Image: ${TARGET_IMAGE}"
+          echo "📊 Image Information:"
+          echo "   🔹 Source: $SOURCE_IMAGE"
+          echo "   🔹 Target: $TARGET_IMAGE"
+          echo "   🔹 Type: $([ "$IS_OFFICIAL" == "true" ] && echo "Official" || echo "Repository")"
+          echo "::endgroup::"
           
           # Check if target image already exists
-          if docker manifest inspect "${TARGET_IMAGE}" > /dev/null 2>&1; then
-            echo "Target image already exists in GitHub Packages"
+          echo "::group::🔍 Checking existing image"
+          image_exists=false
+          existing_digest=""
+          
+          if docker manifest inspect "$TARGET_IMAGE" >/dev/null 2>&1; then
+            echo "📦 Target image already exists in GHCR"
+            image_exists=true
             
-            # If it's a 'latest' image, we should update it even if it exists
+            if docker pull "$TARGET_IMAGE" >/dev/null 2>&1; then
+              existing_digest=$(docker inspect "$TARGET_IMAGE" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
+              echo "🔐 Existing image hash: $existing_digest"
+            fi
+            
             if [[ "$IMAGE_VERSION" == "latest" || "$USE_LATEST" == "true" ]]; then
-              echo "This is a 'latest' image request - updating the existing image"
-              echo "image_exists=true" >> $GITHUB_OUTPUT
-              echo "update_latest=true" >> $GITHUB_OUTPUT
-              echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
-              
-              # Get old digest before updating
-              OLD_TARGET_DIGEST=$(docker pull "${TARGET_IMAGE}" > /dev/null && docker inspect --format='{{index .RepoDigests 0}}' "${TARGET_IMAGE}" | cut -d '@' -f 2)
-              echo "old_target_digest=${OLD_TARGET_DIGEST}" >> $GITHUB_OUTPUT
-              
-              # Proceed with the update process - force pull the latest
-              echo "Pulling latest ${SOURCE_IMAGE}..."
-              docker pull "${SOURCE_IMAGE}"
+              echo "🔄 This is a 'latest' request - will update existing image"
             else
-              # For non-latest images, we just mark as duplicate and exit
-              echo "::warning::Image ${TARGET_IMAGE} already exists in GitHub Packages"
+              echo "⚠️  Non-latest image already exists - will skip"
               echo "image_exists=true" >> $GITHUB_OUTPUT
-              echo "update_latest=false" >> $GITHUB_OUTPUT
-              echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
+              echo "update_needed=false" >> $GITHUB_OUTPUT
+              echo "target_image=$TARGET_IMAGE" >> $GITHUB_OUTPUT
+              echo "audit_file=$audit_file" >> $GITHUB_OUTPUT
+              echo "image_mapping=$IMAGE_MAPPING" >> $GITHUB_OUTPUT
               exit 0
             fi
           else
-            # Image doesn't exist yet
-            echo "image_exists=false" >> $GITHUB_OUTPUT
-            echo "update_latest=false" >> $GITHUB_OUTPUT
+            echo "📦 Image does not exist in GHCR yet"
+          fi
+          echo "::endgroup::"
+          
+          # Pull source image
+          echo "::group::📥 Pulling source image"
+          pull_success=false
+          pull_method=""
+          
+          echo "📥 Attempting to pull: $SOURCE_IMAGE"
+          if docker pull "$SOURCE_IMAGE" >/dev/null 2>&1; then
+            echo "✅ Successfully pulled: $SOURCE_IMAGE"
+            pull_success=true
+            pull_method="direct"
+          else
+            echo "⚠️  Direct pull failed, trying alternative formats..."
             
-            # Pull source image
-            echo "Pulling ${SOURCE_IMAGE}..."
-            docker pull "${SOURCE_IMAGE}"
+            # Try with library prefix for official images
+            if [[ "$IS_OFFICIAL" == "true" ]]; then
+              alt_source="library/$SOURCE_IMAGE"
+              echo "📥 Trying: $alt_source"
+              if docker pull "$alt_source" >/dev/null 2>&1; then
+                echo "✅ Successfully pulled: $alt_source"
+                docker tag "$alt_source" "$SOURCE_IMAGE"
+                pull_success=true
+                pull_method="library_prefix"
+              fi
+            fi
+            
+            # Try repetitive format for complex names
+            if [[ "$pull_success" == "false" ]] && [[ "$SOURCE_IMAGE" == *"/"* ]]; then
+              # Extract repo and image for repetitive format
+              repo_part=$(echo "$SOURCE_IMAGE" | cut -d: -f1 | cut -d/ -f1)
+              image_part=$(echo "$SOURCE_IMAGE" | cut -d: -f1 | cut -d/ -f2)
+              version_part=$(echo "$SOURCE_IMAGE" | cut -d: -f2)
+              
+              alt_source="$repo_part/$image_part/$image_part:$version_part"
+              echo "📥 Trying repetitive format: $alt_source"
+              if docker pull "$alt_source" >/dev/null 2>&1; then
+                echo "✅ Successfully pulled: $alt_source"
+                docker tag "$alt_source" "$SOURCE_IMAGE"
+                pull_success=true
+                pull_method="repetitive"
+              fi
+            fi
           fi
           
-          # Get image digest
-          SOURCE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${SOURCE_IMAGE}" | cut -d '@' -f 2)
-          echo "Source Image Digest: ${SOURCE_DIGEST}"
-          echo "source_digest=${SOURCE_DIGEST}" >> $GITHUB_OUTPUT
-          
-          # Tag image for GitHub Packages
-          docker tag "${SOURCE_IMAGE}" "${TARGET_IMAGE}"
-          
-          # Push to GitHub Packages
-          echo "Pushing to GitHub Packages as ${TARGET_IMAGE}..."
-          docker push "${TARGET_IMAGE}"
-          
-          # Get target image digest
-          TARGET_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${TARGET_IMAGE}" | cut -d '@' -f 2)
-          echo "Target Image Digest: ${TARGET_DIGEST}"
-          echo "target_image=${TARGET_IMAGE}" >> $GITHUB_OUTPUT
-          echo "target_digest=${TARGET_DIGEST}" >> $GITHUB_OUTPUT
-          
+          if [[ "$pull_success" == "false" ]]; then
+            echo "❌ Failed to pull source image with all methods"
+            echo "pull_success=false" >> $GITHUB_OUTPUT
+            echo "audit_file=$audit_file" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           echo "::endgroup::"
+          
+          # Get source image details
+          echo "::group::🔐 Image analysis"
+          source_hash=$(docker inspect "$SOURCE_IMAGE" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
+          source_size=$(docker inspect "$SOURCE_IMAGE" --format='{{.Size}}' 2>/dev/null)
+          source_created=$(docker inspect "$SOURCE_IMAGE" --format='{{.Created}}' 2>/dev/null)
+          
+          echo "📊 Source image details:"
+          echo "   🔐 Hash: $source_hash"
+          echo "   📏 Size: $source_size bytes"
+          echo "   🕐 Created: $source_created"
+          echo "   🔧 Pull method: $pull_method"
+          
+          # Check if update is needed
+          update_needed=true
+          if [[ "$image_exists" == "true" ]] && [[ "$source_hash" == "$existing_digest" ]]; then
+            echo "✅ Source and target have same hash - no update needed"
+            update_needed=false
+          fi
+          echo "::endgroup::"
+          
+          # Tag and push
+          if [[ "$update_needed" == "true" ]] || [[ "$image_exists" == "false" ]]; then
+            echo "::group::📤 Pushing to GHCR"
+            echo "🏷️  Tagging: $SOURCE_IMAGE -> $TARGET_IMAGE"
+            if docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE" >/dev/null 2>&1; then
+              echo "📤 Pushing to GitHub Container Registry..."
+              push_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              
+              if docker push "$TARGET_IMAGE" 2>&1 | tee push_output.log; then
+                push_end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                echo "✅ Successfully pushed to GHCR"
+                echo "⏱️  Push duration: $push_start to $push_end"
+                
+                # Get target hash
+                target_hash=$(docker inspect "$TARGET_IMAGE" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
+                echo "🔐 Target hash: $target_hash"
+                
+                # Show push summary
+                if [ -f push_output.log ]; then
+                  echo "📋 Push summary:"
+                  grep -E "(Pushed|Already exists|Layer already exists)" push_output.log || echo "No layer information found"
+                  rm -f push_output.log
+                fi
+                
+                push_success=true
+              else
+                echo "❌ Failed to push to GHCR"
+                push_success=false
+              fi
+            else
+              echo "❌ Failed to tag image"
+              push_success=false
+            fi
+            echo "::endgroup::"
+          else
+            echo "ℹ️  No push needed - image is up to date"
+            target_hash="$existing_digest"
+            push_success=true
+          fi
+          
+          # Update audit file
+          if [ -f "$audit_file" ]; then
+            temp_audit=$(mktemp)
+            jq --arg target "$TARGET_IMAGE" \
+               --arg status "$([ "$push_success" == "true" ] && echo "success" || echo "failed")" \
+               --arg source_hash "$source_hash" \
+               --arg target_hash "$target_hash" \
+               --arg pull_method "$pull_method" \
+               --arg image_exists "$image_exists" \
+               --arg update_needed "$update_needed" \
+               '.request.target = $target | .request.status = $status | .request.source_hash = $source_hash | .request.target_hash = $target_hash | .request.pull_method = $pull_method | .request.image_exists = ($image_exists == "true") | .request.update_needed = ($update_needed == "true")' \
+               "$audit_file" > "$temp_audit" && mv "$temp_audit" "$audit_file"
+          fi
+          
+          # Set outputs
+          echo "pull_success=$pull_success" >> $GITHUB_OUTPUT
+          echo "push_success=$push_success" >> $GITHUB_OUTPUT
+          echo "image_exists=$image_exists" >> $GITHUB_OUTPUT
+          echo "update_needed=$update_needed" >> $GITHUB_OUTPUT
+          echo "source_image=$SOURCE_IMAGE" >> $GITHUB_OUTPUT
+          echo "target_image=$TARGET_IMAGE" >> $GITHUB_OUTPUT
+          echo "source_hash=$source_hash" >> $GITHUB_OUTPUT
+          echo "target_hash=$target_hash" >> $GITHUB_OUTPUT
+          echo "pull_method=$pull_method" >> $GITHUB_OUTPUT
+          echo "audit_file=$audit_file" >> $GITHUB_OUTPUT
+          echo "image_mapping=$IMAGE_MAPPING" >> $GITHUB_OUTPUT
+          
+          echo "::group::📈 Final Results"
+          echo "✅ Pull success: $pull_success"
+          echo "📤 Push success: $push_success"
+          echo "📦 Image existed: $image_exists"
+          echo "🔄 Update needed: $update_needed"
+          echo "🔐 Source hash: $source_hash"
+          echo "🔐 Target hash: $target_hash"
+          echo "::endgroup::"
+          
+          exit 0
       
-      - name: Update issue with results
+      - name: 📊 Generate Job Summary
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e  # Disable exit on error for summary generation
+          
+          echo "# 🚀 Docker Image Import Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**🕐 Execution Time:** $(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)" >> $GITHUB_STEP_SUMMARY
+          echo "**🔄 Workflow Run:** [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "**👤 Requested by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Get values with defaults
+          pull_success="${{ steps.docker_pull_push.outputs.pull_success || 'false' }}"
+          push_success="${{ steps.docker_pull_push.outputs.push_success || 'false' }}"
+          image_exists="${{ steps.docker_pull_push.outputs.image_exists || 'false' }}"
+          update_needed="${{ steps.docker_pull_push.outputs.update_needed || 'false' }}"
+          source_image="${{ steps.docker_pull_push.outputs.source_image || 'N/A' }}"
+          target_image="${{ steps.docker_pull_push.outputs.target_image || 'N/A' }}"
+          
+          # Status determination
+          if [ "$pull_success" = "true" ] && [ "$push_success" = "true" ]; then
+            if [ "$image_exists" = "true" ] && [ "$update_needed" = "true" ]; then
+              status="🔄 Updated"
+              status_color="🟡"
+            elif [ "$image_exists" = "true" ] && [ "$update_needed" = "false" ]; then
+              status="✅ Up-to-date"
+              status_color="🟢"
+            else
+              status="🆕 Imported"
+              status_color="🟢"
+            fi
+          else
+            status="❌ Failed"
+            status_color="🔴"
+          fi
+          
+          # Statistics
+          echo "## 📈 Import Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Overall Status | $status_color $status |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📥 Pull Success | $([ "$pull_success" = "true" ] && echo "✅ Yes" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📤 Push Success | $([ "$push_success" = "true" ] && echo "✅ Yes" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Existed Before | $([ "$image_exists" = "true" ] && echo "✅ Yes" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔄 Update Needed | $([ "$update_needed" = "true" ] && echo "✅ Yes" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Image details
+          echo "## 🐳 Image Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📥 Source Image | \`$source_image\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📤 Target Image | \`$target_image\` |" >> $GITHUB_STEP_SUMMARY
+          
+          # Hash information
+          source_hash="${{ steps.docker_pull_push.outputs.source_hash }}"
+          target_hash="${{ steps.docker_pull_push.outputs.target_hash }}"
+          pull_method="${{ steps.docker_pull_push.outputs.pull_method }}"
+          
+          if [ -n "$source_hash" ] && [ "$source_hash" != "" ]; then
+            echo "| 🔐 Source Hash | \`$source_hash\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "$target_hash" ] && [ "$target_hash" != "" ]; then
+            echo "| 🔐 Target Hash | \`$target_hash\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "$pull_method" ] && [ "$pull_method" != "" ]; then
+            echo "| 🔧 Pull Method | \`$pull_method\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Image mapping info
+          image_mapping="${{ steps.docker_pull_push.outputs.image_mapping }}"
+          if [ -n "$image_mapping" ] && [ "$image_mapping" != "" ]; then
+            echo "## 🗂️ Image Mapping" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Click to expand mapping information</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "```json" >> $GITHUB_STEP_SUMMARY
+            echo "$image_mapping" >> $GITHUB_STEP_SUMMARY
+            echo "```" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Usage instructions
+          echo "## 🚀 Usage Instructions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$pull_success" = "true" ] && [ "$push_success" = "true" ]; then
+            echo "You can now use this image in your workflows:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "```yaml" >> $GITHUB_STEP_SUMMARY
+            echo "# In your GitHub Actions workflow:" >> $GITHUB_STEP_SUMMARY
+            echo "- name: Use imported image" >> $GITHUB_STEP_SUMMARY
+            echo "  uses: docker://$(echo "$target_image" | sed 's/ghcr.io\///')" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Or in docker-compose:" >> $GITHUB_STEP_SUMMARY
+            echo "services:" >> $GITHUB_STEP_SUMMARY
+            echo "  myservice:" >> $GITHUB_STEP_SUMMARY
+            echo "    image: $target_image" >> $GITHUB_STEP_SUMMARY
+            echo "```" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Image import failed. Please check the logs above for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Audit file info
+          audit_file="${{ steps.docker_pull_push.outputs.audit_file }}"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Audit Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$audit_file" ] && [ "$audit_file" != "" ]; then
+            echo "- **📝 Audit File:** \`$audit_file\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **📝 Audit File:** Not available" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **🔍 Full import trail available in workflow logs**" >> $GITHUB_STEP_SUMMARY
+          
+          exit 0
+
+      - name: 💬 Update issue with results
+        if: always()
         uses: actions/github-script@v6
         env:
+          PULL_SUCCESS: ${{ steps.docker_pull_push.outputs.pull_success }}
+          PUSH_SUCCESS: ${{ steps.docker_pull_push.outputs.push_success }}
           IMAGE_EXISTS: ${{ steps.docker_pull_push.outputs.image_exists }}
-          UPDATE_LATEST: ${{ steps.docker_pull_push.outputs.update_latest }}
+          UPDATE_NEEDED: ${{ steps.docker_pull_push.outputs.update_needed }}
+          SOURCE_IMAGE: ${{ steps.docker_pull_push.outputs.source_image }}
           TARGET_IMAGE: ${{ steps.docker_pull_push.outputs.target_image }}
-          SOURCE_DIGEST: ${{ steps.docker_pull_push.outputs.source_digest }}
-          TARGET_DIGEST: ${{ steps.docker_pull_push.outputs.target_digest }}
-          OLD_TARGET_DIGEST: ${{ steps.docker_pull_push.outputs.old_target_digest }}
+          SOURCE_HASH: ${{ steps.docker_pull_push.outputs.source_hash }}
+          TARGET_HASH: ${{ steps.docker_pull_push.outputs.target_hash }}
+          PULL_METHOD: ${{ steps.docker_pull_push.outputs.pull_method }}
+          IMAGE_MAPPING: ${{ steps.docker_pull_push.outputs.image_mapping }}
         with:
           script: |
+            const pullSuccess = process.env.PULL_SUCCESS === 'true';
+            const pushSuccess = process.env.PUSH_SUCCESS === 'true';
             const imageExists = process.env.IMAGE_EXISTS === 'true';
-            const updateLatest = process.env.UPDATE_LATEST === 'true';
-            const targetImage = process.env.TARGET_IMAGE;
-            const sourceDigest = process.env.SOURCE_DIGEST;
-            const targetDigest = process.env.TARGET_DIGEST;
-            const oldTargetDigest = process.env.OLD_TARGET_DIGEST;
+            const updateNeeded = process.env.UPDATE_NEEDED === 'true';
+            const sourceImage = process.env.SOURCE_IMAGE || 'N/A';
+            const targetImage = process.env.TARGET_IMAGE || 'N/A';
+            const sourceHash = process.env.SOURCE_HASH || '';
+            const targetHash = process.env.TARGET_HASH || '';
+            const pullMethod = process.env.PULL_METHOD || '';
+            const imageMapping = process.env.IMAGE_MAPPING || '';
             const workflowRunUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             
             let commentBody = '';
-            let labels = [];
+            let labels = ['import-request'];
             
-            if (imageExists && !updateLatest) {
-              // Regular duplicate image case - no update needed
-              commentBody = `## ℹ️ Image Already Exists
-              
-              The requested image already exists in GitHub Packages.
-              
-              - **Image**: \`${targetImage}\`
-              - **Workflow Run**: [View Logs](${workflowRunUrl})
-              
-              You can use this image in your workflows or deployments.`;
-              
-              labels = ['import-request', 'duplicate', 'resolved'];
-            } else if (imageExists && updateLatest) {
-              // Latest image was updated
-              commentBody = `## 🔄 Latest Image Updated
-              
-              Successfully updated the latest image in GitHub Packages.
-              
-              - **Image**: \`${targetImage}\`
-              - **Previous Digest**: \`${oldTargetDigest}\`
-              - **Source Digest**: \`${sourceDigest}\`
-              - **New Target Digest**: \`${targetDigest}\`
-              - **Workflow Run**: [View Logs](${workflowRunUrl})
-              - **Update Timestamp**: ${new Date().toISOString()}
-              - **Updated by**: @${context.actor}
-              
-              You can now use this updated image in your workflows or deployments.`;
-              
-              labels = ['import-request', 'updated-latest', 'resolved'];
-            } else {
-              // New image was imported
-              commentBody = `## ✅ Import Complete
-              
-              Successfully imported the image to GitHub Packages.
-              
-              - **Image**: \`${targetImage}\`
-              - **Source Digest**: \`${sourceDigest}\`
-              - **Target Digest**: \`${targetDigest}\`
-              - **Workflow Run**: [View Logs](${workflowRunUrl})
-              - **Import Timestamp**: ${new Date().toISOString()}
-              - **Imported by**: @${context.actor}
-              
-              You can now use this image in your workflows or deployments.`;
-              
-              labels = ['import-request', 'imported', 'resolved'];
+            // Remove processing label
+            try {
+              await github.rest.issues.removeLabel({
+                issue_number: context.payload.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'processing'
+              });
+            } catch (error) {
+              console.log('Processing label not found or already removed');
             }
             
+            if (!pullSuccess) {
+              // Pull failed
+              commentBody = `## ❌ Import Failed - Pull Error
+              
+              Failed to pull the source image. This could be due to:
+              - Image doesn't exist on Docker Hub
+              - Incorrect image name or repository
+              - Network connectivity issues
+              - Authentication problems
+              
+              **📋 Request Details:**
+              - **Source:** \`${sourceImage}\`
+              - **Target:** \`${targetImage}\`
+              - **Pull Method Attempted:** \`${pullMethod || 'direct'}\`
+              
+              **🔗 Links:**
+              - [📋 Workflow Logs](${workflowRunUrl})
+              - [🐳 Check Docker Hub](https://hub.docker.com/search?q=${encodeURIComponent(sourceImage.split(':')[0])})
+              
+              Please verify the image name and try again.`;
+              
+              labels.push('failed', 'pull-error');
+            } else if (!pushSuccess) {
+              // Push failed
+              commentBody = `## ❌ Import Failed - Push Error
+              
+              Successfully pulled the source image but failed to push to GitHub Container Registry.
+              
+              **📋 Details:**
+              - **Source:** \`${sourceImage}\` ✅
+              - **Target:** \`${targetImage}\` ❌
+              - **Source Hash:** \`${sourceHash}\`
+              - **Pull Method:** \`${pullMethod}\`
+              
+              **🔗 Links:**
+              - [📋 Workflow Logs](${workflowRunUrl})
+              
+              This is likely a temporary issue. Please try again later.`;
+              
+              labels.push('failed', 'push-error');
+            } else if (imageExists && !updateNeeded) {
+              // Image exists and no update needed
+              commentBody = `## ✅ Image Already Up-to-Date
+              
+              The requested image already exists and is up-to-date in GitHub Container Registry.
+              
+              **📋 Details:**
+              - **Source:** \`${sourceImage}\`
+              - **Target:** \`${targetImage}\`
+              - **Hash:** \`${sourceHash}\`
+              - **Status:** No changes detected
+              
+              **🚀 Usage:**
+              \`\`\`yaml
+              # Use in GitHub Actions:
+              uses: docker://${targetImage.replace('ghcr.io/', '')}
+              
+              # Use in docker-compose:
+              image: ${targetImage}
+              \`\`\`
+              
+              **🔗 Links:**
+              - [📋 Workflow Logs](${workflowRunUrl})
+              - [📦 View Package](https://github.com/orgs/${context.repo.owner}/packages)`;
+              
+              labels.push('resolved', 'up-to-date');
+            } else if (imageExists && updateNeeded) {
+              // Image was updated
+              commentBody = `## 🔄 Image Successfully Updated
+              
+              Successfully updated the existing image with the latest version.
+              
+              **📋 Update Details:**
+              - **Source:** \`${sourceImage}\`
+              - **Target:** \`${targetImage}\`
+              - **Previous Hash:** \`${targetHash}\`
+              - **New Hash:** \`${sourceHash}\`
+              - **Pull Method:** \`${pullMethod}\`
+              - **Updated:** ${new Date().toISOString()}
+              
+              **🚀 Usage:**
+              \`\`\`yaml
+              # Use in GitHub Actions:
+              uses: docker://${targetImage.replace('ghcr.io/', '')}
+              
+              # Use in docker-compose:
+              image: ${targetImage}
+              \`\`\`
+              
+              ${imageMapping ? `**🗂️ Mapping Info:**
+              \`\`\`json
+              ${imageMapping}
+              \`\`\`` : ''}
+              
+              **🔗 Links:**
+              - [📋 Workflow Logs](${workflowRunUrl})
+              - [📦 View Package](https://github.com/orgs/${context.repo.owner}/packages)`;
+              
+              labels.push('resolved', 'updated');
+            } else {
+              // New image imported
+              commentBody = `## 🎉 Image Successfully Imported
+              
+              Successfully imported the requested image to GitHub Container Registry.
+              
+              **📋 Import Details:**
+              - **Source:** \`${sourceImage}\`
+              - **Target:** \`${targetImage}\`
+              - **Hash:** \`${sourceHash}\`
+              - **Pull Method:** \`${pullMethod}\`
+              - **Imported:** ${new Date().toISOString()}
+              - **Imported by:** @${context.actor}
+              
+              **🚀 Usage:**
+              \`\`\`yaml
+              # Use in GitHub Actions:
+              uses: docker://${targetImage.replace('ghcr.io/', '')}
+              
+              # Use in docker-compose:
+              image: ${targetImage}
+              \`\`\`
+              
+              ${imageMapping ? `**🗂️ Mapping Info:**
+              \`\`\`json
+              ${imageMapping}
+              \`\`\`` : ''}
+              
+              **🔗 Links:**
+              - [📋 Workflow Logs](${workflowRunUrl})
+              - [📦 View Package](https://github.com/orgs/${context.repo.owner}/packages)
+              
+              Thank you for contributing to our image collection! 🙏`;
+              
+              labels.push('resolved', 'imported');
+            }
+            
+            // Add comment
             await github.rest.issues.createComment({
               issue_number: context.payload.issue.number,
               owner: context.repo.owner,
@@ -263,7 +741,7 @@ jobs:
               body: commentBody
             });
             
-            // Close the issue with appropriate labels
+            // Update labels and close issue
             await github.rest.issues.update({
               issue_number: context.payload.issue.number,
               owner: context.repo.owner,
@@ -271,3 +749,12 @@ jobs:
               state: 'closed',
               labels: labels
             });
+
+      - name: 📤 Upload Audit File
+        if: always() && steps.docker_pull_push.outputs.audit_file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-import-audit-${{ github.run_id }}
+          path: ${{ steps.docker_pull_push.outputs.audit_file }}
+          retention-days: 90
+          if-no-files-found: warn
