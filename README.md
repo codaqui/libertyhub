@@ -1,6 +1,8 @@
 # 🚀 LibertyHub
 
-[![Image Request](assets/image.png)](https://github.com/codaqui/libertyhub/issues/new/choose)
+[![Image - **🚫 Duplicate Prevention**: System verifies if the requested image already exists before processing
+- **🔄 Execution Control**: Prevents duplicate workflow runs with smart event handling and state tracking
+- **🗂️ Image Mapping**: Advanced naming system to handle complex Docker Hub structuresuest](assets/image.png)](https://github.com/codaqui/libertyhub/issues/new/choose)
 
 Repository to release images from Docker Hub and securely republish them within GitHub Packages in an auditable and reliable manner.
 
@@ -110,43 +112,6 @@ Each import creates a mapping record:
 - `standard`: Direct mapping (official images)
 - `org_image_combination`: Organization + image name combination 
 - `sanitized_fallback`: Fallback for complex structures
-
-### 🔄 **Retrocompatibility & Update System**
-
-#### Global Mapping File
-The system maintains a `docker_hub_mappings.json` file that provides retrocompatibility:
-
-```json
-{
-  "mappings": {
-    "bitnami-nginx": {
-      "docker_hub_image": "bitnami/nginx",
-      "created": "2025-06-11T20:30:45Z",
-      "last_verified": "2025-06-11T20:30:45Z"
-    },
-    "homeassistant-core": {
-      "docker_hub_image": "homeassistant/core", 
-      "created": "2025-06-11T20:30:45Z",
-      "last_verified": "2025-06-11T20:30:45Z"
-    }
-  },
-  "last_updated": "2025-06-11T20:30:45Z",
-  "version": "1.0"
-}
-```
-
-#### Update-Latest Process
-1. **🔍 Mapping Lookup**: Checks global mapping file for exact Docker Hub image name
-2. **📥 Intelligent Pull**: Uses mapping to pull correct source (e.g., `bitnami/nginx`)  
-3. **🔄 Update Check**: Compares hashes to determine if update needed
-4. **📤 Push**: Updates GHCR image if changes detected
-
-#### Fallback Strategies
-For images without mappings, the system tries:
-1. **Single name**: `nginx` → `docker.io/nginx:latest`
-2. **First hyphen split**: `bitnami-nginx` → `docker.io/bitnami/nginx:latest`
-3. **Last hyphen split**: `microsoft-mssql-server-linux` → `docker.io/microsoft/mssql-server-linux:latest`
-4. **Legacy repetitive**: `nginx` → `docker.io/nginx/nginx:latest`
 
 ## 🚀 Usage
 
