@@ -105,7 +105,7 @@ jobs:
                       '**Issue**: Repository/Organization name is required for non-official images.\\n\\n' +
                       '**Solutions**:\\n' +
                       '1. Fill in the "Repository/Organization Name" field (e.g., "jetbrains" for jetbrains/code-with-me-relay)\\n' +
-                      '2. OR check the "This is an official Docker Hub image" option if this image doesn\\'t belong to an organization\\n\\n' +
+                      '2. OR check the "This is an official Docker Hub image" option if this image does not belong to an organization\\n\\n' +
                       '**Detected values**:\\n' +
                       '- Image Source: `' + (source || 'not detected') + '`\\n' +
                       '- Repository/Organization Name: `' + (repo || 'empty/not detected') + '`\\n' +
