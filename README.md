@@ -291,6 +291,19 @@ Contributions to improve LibertyHub are welcome:
 3. 🔧 **Code contributions**: Follow our PR guidelines
 4. 📚 **Documentation**: Help improve this README
 
+## 🚀 Development & Credits
+
+**Version 2.0.0** - Enhanced automation and improved user experience
+
+This major version was developed with the assistance of **Claude Sonnet 4**, which significantly contributed to:
+- 🔧 **Workflow Optimization**: Enhanced GitHub Actions workflows with better error handling
+- 📝 **Documentation Improvements**: Comprehensive README updates and clearer user guidance  
+- 🎨 **Issue Template Enhancement**: More intuitive and informative request templates
+- 🐛 **Bug Fixes**: Resolution of Docker template parsing errors and naming conflicts
+- ✨ **Feature Enhancements**: Improved audit trails and automatic update mechanisms
+
+*Special thanks to Claude Sonnet 4 for the exceptional assistance in making LibertyHub more robust and user-friendly.*
+
 ## 📄 License
 
-This code was generated with GitHub Copilot using Claude 3.7 Sonnet Model. The code is licensed under the MIT License.
+LibertyHub is licensed under the MIT License. Version 2.0.0 was developed with significant assistance from Claude Sonnet 4, demonstrating the power of AI-assisted development in creating robust automation solutions.
