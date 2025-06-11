@@ -65,6 +65,14 @@ jobs:
           echo "📝 Creating audit file: $audit_file"
           echo '{"timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "workflow_run": "'${{ github.run_id }}'", "images": []}' > "$audit_file"
           
+          # Verify audit file was created
+          if [ ! -f "$audit_file" ]; then
+            echo "❌ Failed to create audit file"
+            audit_file=""
+          else
+            echo "✅ Audit file created successfully: $audit_file"
+          fi
+          
           images=(
             ${{ steps.list_latest_images.outputs.images }}
           )
@@ -152,8 +160,12 @@ jobs:
             fi
             
             # Add to audit file
-            temp_audit=$(mktemp)
-            jq --argjson entry "$image_audit" '.images += [$entry]' "$audit_file" > "$temp_audit" && mv "$temp_audit" "$audit_file"
+            if [ -n "$audit_file" ] && [ -f "$audit_file" ]; then
+              temp_audit=$(mktemp)
+              jq --argjson entry "$image_audit" '.images += [$entry]' "$audit_file" > "$temp_audit" && mv "$temp_audit" "$audit_file"
+            else
+              echo "⚠️  Audit file not available, skipping audit entry"
+            fi
             
             echo "::endgroup::"
           done
@@ -254,9 +266,10 @@ jobs:
           echo "- **🔍 Full audit trail available in workflow logs**" >> $GITHUB_STEP_SUMMARY
 
       - name: 📤 Upload Audit File
-        if: always()
+        if: always() && steps.update_images.outputs.audit_file != ''
         uses: actions/upload-artifact@v4
         with:
           name: image-update-audit-${{ github.run_id }}
           path: ${{ steps.update_images.outputs.audit_file }}
           retention-days: 90
+          if-no-files-found: warn
