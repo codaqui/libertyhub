@@ -1,79 +1,296 @@
-# LibertyHub
+# 🚀 LibertyHub
 
 [![Image Request](assets/image.png)](https://github.com/codaqui/libertyhub/issues/new/choose)
 
 Repository to release images from Docker Hub and securely republish them within GitHub Packages in an auditable and reliable manner.
 
-## Purpose
+## 🎯 Purpose
 
 LibertyHub is designed to provide a transparent and secure way to import container images from external sources (initially Docker Hub) into GitHub Packages. This enhances security, provides audit trails, and reduces dependency on external registries.
 
-## How It Works
+## 🔄 How It Works
 
-1. **Issue-Based Workflow**: Users create an issue using a standardized template
-2. **Automated Processing**: GitHub Workflows process the request
-3. **Verification & Publishing**: The system checks if the image already exists, then imports and publishes it
-4. **Audit Trail**: All actions are logged for complete transparency
+1. **📋 Issue-Based Workflow**: Users create an issue using a standardized template
+2. **🤖 Automated Processing**: GitHub Workflows process the request with intelligent naming
+3. **✅ Verification & Publishing**: The system checks, imports and publishes with proper mapping
+4. **📊 Audit Trail**: All actions are logged for complete transparency
 
-## Features
+## ✨ Features
 
-- **Source Selection**: Choose the image source (initially Docker Hub, with plans to expand)
-- **Support for Official Images**: Option to mark an image as an official Docker Hub image
-- **Simple Request Process**: Easy-to-use issue template with dropdown options
-- **Latest Version Support**: Option to select the latest version of an image
-- **Automatic Updates**: For images marked as "latest", duplicate requests will trigger an update
-- **Naming Convention**: Images are republished following the pattern `<source>-<image>:<version>`
-- **Complete Audit Trail**: All actions are logged, including image hashes, versions, and workflow details
-- **Duplicate Prevention**: System verifies if the requested image already exists before processing
+- **🎛️ Source Selection**: Choose the image source (initially Docker Hub, with plans to expand)
+- **📦 Support for Official Images**: Option to mark an image as an official Docker Hub image
+- **📝 Simple Request Process**: Easy-to-use issue template with dropdown options
+- **🔄 Latest Version Support**: Option to select the latest version of an image
+- **🔄 Automatic Updates**: For images marked as "latest", duplicate requests will trigger an update
+- **🏷️ Intelligent Naming**: Smart naming convention with conflict resolution
+- **📋 Complete Audit Trail**: All actions are logged, including image hashes, versions, and workflow details
+- **🚫 Duplicate Prevention**: System verifies if the requested image already exists before processing
+- **🗂️ Image Mapping**: Advanced naming system to handle complex Docker Hub structures
 
-## Usage
+## 🏷️ Naming Convention & Image Mapping
 
-### Text
+### Standard Naming Pattern
+Images are republished following the pattern: 
+- **Official images**: `ghcr.io/codaqui/dockerhub-<image>:<version>`
+- **Organization images**: `ghcr.io/codaqui/dockerhub-<org>-<image>:<version>`
 
-1. Create a new issue using the "Image Import Request" template
-2. Fill in the required information:
-   - Image source (select "Docker Hub" from dropdown)
-   - Check "This is an official Docker Hub image" if applicable
-   - Repository name (leave empty for official images, e.g., nginx, ubuntu)
-   - Repository name (required for non-official images, e.g., bitnami)
-   - Image name
-   - Version (or check "Use latest")
-3. Submit the issue
-4. The workflow will process your request automatically and provide updates in the issue comments
-5. Once completed, the image will be available in GitHub Packages with the naming convention `dockerhub-<image>:<version>`
+### Intelligent Image Name Extraction
 
-### Keeping Latest Images Updated
+The system uses intelligent extraction to handle various Docker Hub naming patterns:
 
-To update an image tagged as "latest" to the newest version available:
-1. Simply create a new image import request with the same image details
-2. Check the "Use latest" option
-3. Submit the issue
-4. The system will detect it's a duplicate request for a "latest" image and automatically update it
+#### 📦 Official Images
+```
+Docker Hub: nginx:latest
+GHCR: ghcr.io/codaqui/dockerhub-nginx:latest
+```
 
-### Scheduled Updates for Latest Images
+#### 🏢 Organization/Repository Images
+```
+Docker Hub: bitnami/nginx:latest
+GHCR: ghcr.io/codaqui/dockerhub-bitnami-nginx:latest
 
-A scheduled workflow has been added to automatically update all images tagged with 'latest' on a daily basis. This ensures that the latest images are always up-to-date without requiring manual intervention. Additionally, you can manually trigger the workflow using the `workflow_dispatch` event for immediate synchronization.
+Docker Hub: homeassistant/core:latest  
+GHCR: ghcr.io/codaqui/dockerhub-homeassistant-core:latest
 
-## Audit Information
+Docker Hub: confluentinc/cp-kafka:latest
+GHCR: ghcr.io/codaqui/dockerhub-confluentinc-cp-kafka:latest
+```
 
-Each image import includes the following audit information:
+#### 🔧 Complex Naming Examples
+```
+Docker Hub: homeassistant/aarch64-homeassistant:latest
+GHCR: ghcr.io/codaqui/dockerhub-homeassistant-aarch64-homeassistant:latest
 
-- Original image source and URL
-- Image hash before and after import
-- Timestamp of import
-- GitHub Actions workflow run ID and logs
-- User who initiated the request
+Docker Hub: microsoft/mssql-server-linux:latest
+GHCR: ghcr.io/codaqui/dockerhub-microsoft-mssql-server-linux:latest
 
-For updated "latest" images, additional audit information includes:
-- Previous image digest
-- New image digest
-- Update timestamp
-- User who initiated the update
+Docker Hub: prom/prometheus:latest
+GHCR: ghcr.io/codaqui/dockerhub-prom-prometheus:latest
+```
 
-## Contributing
+### 🚨 Naming Conflict Resolution & Limitations
 
-Contributions to improve LibertyHub are welcome. Please see our contributing guidelines for more information.
+**Organization Names with Hyphens**: ❌ **Not Supported**
 
-## License
+The system **rejects** organization names containing hyphens to avoid conflicts:
 
-That code was generated with GitHub Copilot using Claude 3.7 Sonnet Model. The code is licensed under the MIT License.
+```
+❌ REJECTED: docker-compose/nginx → Would create: dockerhub-docker-compose-nginx
+❌ REJECTED: my-org/postgres → Would create: dockerhub-my-org-postgres
+```
+
+**Why?**: These create ambiguity in reverse mapping for automatic updates:
+- `dockerhub-my-org-postgres` could be interpreted as:
+  - `my-org/postgres` ✅ (intended)  
+  - `my/org-postgres` ❌ (wrong interpretation)
+
+**Workarounds**:
+1. Use organizations without hyphens when possible
+2. Request official image status from Docker Hub
+3. Use alternative image sources (official variants)
+
+### 📊 Mapping Information
+
+Each import creates a mapping record:
+```json
+{
+  "source_pattern": "homeassistant/core:latest",
+  "target_pattern": "dockerhub-homeassistant-core", 
+  "mapping_type": "org_image_combination",
+  "original_repo": "homeassistant",
+  "original_image": "core",
+  "org_name": "homeassistant", 
+  "image_name": "core",
+  "created": "2025-06-11T20:30:45Z"
+}
+```
+
+**Mapping Types:**
+- `standard`: Direct mapping (official images)
+- `org_image_combination`: Organization + image name combination 
+- `sanitized_fallback`: Fallback for complex structures
+
+### 🔄 **Retrocompatibility & Update System**
+
+#### Global Mapping File
+The system maintains a `docker_hub_mappings.json` file that provides retrocompatibility:
+
+```json
+{
+  "mappings": {
+    "bitnami-nginx": {
+      "docker_hub_image": "bitnami/nginx",
+      "created": "2025-06-11T20:30:45Z",
+      "last_verified": "2025-06-11T20:30:45Z"
+    },
+    "homeassistant-core": {
+      "docker_hub_image": "homeassistant/core", 
+      "created": "2025-06-11T20:30:45Z",
+      "last_verified": "2025-06-11T20:30:45Z"
+    }
+  },
+  "last_updated": "2025-06-11T20:30:45Z",
+  "version": "1.0"
+}
+```
+
+#### Update-Latest Process
+1. **🔍 Mapping Lookup**: Checks global mapping file for exact Docker Hub image name
+2. **📥 Intelligent Pull**: Uses mapping to pull correct source (e.g., `bitnami/nginx`)  
+3. **🔄 Update Check**: Compares hashes to determine if update needed
+4. **📤 Push**: Updates GHCR image if changes detected
+
+#### Fallback Strategies
+For images without mappings, the system tries:
+1. **Single name**: `nginx` → `docker.io/nginx:latest`
+2. **First hyphen split**: `bitnami-nginx` → `docker.io/bitnami/nginx:latest`
+3. **Last hyphen split**: `microsoft-mssql-server-linux` → `docker.io/microsoft/mssql-server-linux:latest`
+4. **Legacy repetitive**: `nginx` → `docker.io/nginx/nginx:latest`
+
+## 🚀 Usage
+
+### 📝 Creating an Import Request
+
+1. **Create Issue**: Use the "Image Import Request" template
+2. **Fill Information**:
+   - **Image source**: Select "Docker Hub" from dropdown
+   - **Official image**: Check if it's an official Docker Hub image
+   - **Repository name**: 
+     - ✅ Leave empty for official images (nginx, ubuntu, postgres)
+     - ✅ Required for organization images (bitnami, homeassistant, microsoft)
+   - **Image name**: The actual image name
+   - **Version**: Specific version or check "Use latest"
+3. **Submit**: The workflow processes automatically
+4. **Track Progress**: Updates provided in issue comments
+5. **Use Image**: Available in GitHub Packages with smart naming
+
+### 📋 Request Examples
+
+#### Official Image
+```
+✅ Source: Docker Hub
+✅ Official: [x] This is an official Docker Hub image  
+✅ Repository: [leave empty]
+✅ Image: nginx
+✅ Version: latest
+Result: ghcr.io/codaqui/dockerhub-nginx:latest
+```
+
+#### Organization Image  
+```
+✅ Source: Docker Hub
+❌ Official: [ ] This is an official Docker Hub image
+✅ Repository: homeassistant
+✅ Image: core 
+✅ Version: latest
+Result: ghcr.io/codaqui/dockerhub-homeassistant-core:latest
+```
+
+#### Complex Organization Image
+```
+✅ Source: Docker Hub
+❌ Official: [ ] This is an official Docker Hub image
+✅ Repository: homeassistant
+✅ Image: aarch64-homeassistant  
+✅ Version: latest
+Result: ghcr.io/codaqui/dockerhub-homeassistant-aarch64-homeassistant:latest
+```
+
+#### Complex Organization
+```
+✅ Source: Docker Hub
+❌ Official: [ ] This is an official Docker Hub image
+✅ Repository: microsoft
+✅ Image: mssql-server-linux
+✅ Version: 2019-latest
+Result: ghcr.io/codaqui/dockerhub-microsoft-mssql-server-linux:2019-latest
+```
+
+### 🔄 Updating Latest Images
+
+To update an image tagged as "latest":
+1. Create a new import request with same details
+2. Check "Use latest" option  
+3. System detects duplicate and updates automatically
+4. Audit trail shows before/after hashes
+
+### ⏰ Scheduled Updates
+
+A scheduled workflow automatically updates all `latest` images daily:
+- 🕛 **Runs**: Daily at midnight UTC
+- 🚀 **Manual trigger**: Available via `workflow_dispatch`
+- 📊 **Smart updates**: Only updates when source image changed
+- 📋 **Full audit**: Complete logging and hash verification
+
+## 📊 Audit & Transparency
+
+### 📋 Import Audit Information
+Each import includes:
+- 🔍 **Source verification**: Original Docker Hub image details
+- 🔐 **Hash tracking**: SHA256 hashes before/after import  
+- 🕐 **Timestamps**: Complete temporal tracking
+- 👤 **Attribution**: User who requested import
+- 🔗 **Workflow logs**: Full GitHub Actions execution logs
+- 🗂️ **Mapping details**: How naming was resolved
+
+### 📈 Update Audit Information  
+For updated images:
+- 🔄 **Previous state**: Hash of existing image
+- 🆕 **New state**: Hash of updated image
+- 📊 **Comparison**: What changed between versions
+- ⚡ **Update trigger**: Manual vs scheduled
+- 🔍 **Pull method**: How the source was obtained
+
+### 🗃️ Audit File Format
+```json
+{
+  "timestamp": "2025-06-11T20:30:45Z",
+  "workflow_run": "15594728920", 
+  "request": {
+    "source": "homeassistant/core:latest",
+    "target": "ghcr.io/codaqui/dockerhub-homeassistant-core:latest",
+    "status": "success",
+    "source_hash": "sha256:abc123...",
+    "target_hash": "sha256:abc123...",
+    "pull_method": "direct",
+    "image_exists": false,
+    "update_needed": true,
+    "mapping": {
+      "source_pattern": "homeassistant/core:latest",
+      "target_pattern": "dockerhub-homeassistant-core",
+      "mapping_type": "org_image_combination",
+      "original_repo": "homeassistant",
+      "original_image": "core",
+      "org_name": "homeassistant",
+      "image_name": "core"
+    }
+  }
+}
+```
+
+## 🛡️ Security & Best Practices
+
+### 🔐 Security Features
+- ✅ **Hash verification**: Every image verified with SHA256
+- ✅ **Audit trails**: Complete transparency in all operations  
+- ✅ **Access control**: GitHub permissions and authentication
+- ✅ **Isolated builds**: Each import in isolated environment
+
+### 📋 Best Practices
+- 🎯 **Specific versions**: Use specific tags when possible vs `latest`
+- 🔄 **Regular updates**: Keep `latest` images updated via scheduled workflow
+- 📊 **Monitor logs**: Review audit information for any anomalies
+- 🏷️ **Consistent naming**: Follow the established naming conventions
+
+## 🤝 Contributing
+
+Contributions to improve LibertyHub are welcome:
+
+1. 🐛 **Bug reports**: Use GitHub issues
+2. 💡 **Feature requests**: Use GitHub discussions  
+3. 🔧 **Code contributions**: Follow our PR guidelines
+4. 📚 **Documentation**: Help improve this README
+
+## 📄 License
+
+This code was generated with GitHub Copilot using Claude 3.7 Sonnet Model. The code is licensed under the MIT License.
