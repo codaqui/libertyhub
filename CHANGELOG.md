@@ -5,6 +5,20 @@ All notable changes to LibertyHub will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2025-06-11
+
+### Fixed
+- 📝 Removed non-implemented "Retrocompatibility & Update System" section from README
+- 📚 Removed references to `docker_hub_mappings.json` file (not implemented)
+- 📋 Removed fallback strategies documentation that doesn't match actual implementation
+- 🎨 Fixed broken emoji characters in feature list
+- 📖 Improved documentation accuracy to match actual functionality
+
+### Removed
+- ❌ Misleading documentation about global mapping file system
+- ❌ Complex fallback strategies that don't exist in implementation
+- ❌ Detailed update-latest process documentation that was incorrect
+
 ## [2.0.0] - 2025-06-11
 
 ### Added
@@ -91,12 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version Comparison Links
 
-- [2.0.0...HEAD](https://github.com/codaqui/libertyhub/compare/v2.0.0...HEAD) (Unreleased)
+- [2.0.1...HEAD](https://github.com/codaqui/libertyhub/compare/v2.0.1...HEAD) (Unreleased)
+- [2.0.0...2.0.1](https://github.com/codaqui/libertyhub/compare/v2.0.0...v2.0.1) (Documentation fixes)
 - [1.1.1...2.0.0](https://github.com/codaqui/libertyhub/compare/v1.1.1...v2.0.0) (Major overhaul)
 - [1.1.0...1.1.1](https://github.com/codaqui/libertyhub/compare/v1.1.0...v1.1.1) (Bug fixes)
 - [1.0.0...1.1.0](https://github.com/codaqui/libertyhub/compare/v1.0.0...v1.1.0) (Feature additions)
 
-[Unreleased]: https://github.com/codaqui/libertyhub/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/codaqui/libertyhub/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/codaqui/libertyhub/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/codaqui/libertyhub/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/codaqui/libertyhub/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/codaqui/libertyhub/compare/v1.0.0...v1.1.0
