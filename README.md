@@ -25,7 +25,8 @@ LibertyHub is designed to provide a transparent and secure way to import contain
 - **🏷️ Intelligent Naming**: Smart naming convention with conflict resolution
 - **📋 Complete Audit Trail**: All actions are logged, including image hashes, versions, and workflow details
 - **🚫 Duplicate Prevention**: System verifies if the requested image already exists before processing
-- **🗂️ Image Mapping**: Advanced naming system to handle complex Docker Hub structures
+- **� Execution Control**: Prevents duplicate workflow runs with smart event handling and state tracking
+- **�🗂️ Image Mapping**: Advanced naming system to handle complex Docker Hub structures
 
 ## 🏷️ Naming Convention & Image Mapping
 

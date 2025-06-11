@@ -2,11 +2,11 @@ name: 🚀 Process Image Import Request
 
 on:
   issues:
-    types: [opened, labeled]  # Removed 'edited' to prevent duplicates
+    types: [opened]  # Only on issue creation to avoid duplicates (template auto-applies labels)
 
 jobs:
   process-import-request:
-    if: contains(github.event.issue.labels.*.name, 'import-request') && !contains(github.event.issue.labels.*.name, 'processing')
+    if: contains(github.event.issue.labels.*.name, 'import-request') && !contains(github.event.issue.labels.*.name, 'processing') && !contains(github.event.issue.labels.*.name, 'resolved')
     runs-on: ubuntu-latest
     permissions:
       issues: write
