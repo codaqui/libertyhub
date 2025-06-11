@@ -195,7 +195,7 @@ jobs:
                   echo "🔐 Pushed image hash: $pushed_hash"
                   
                   successful_images+=("$clean_image")
-                  image_hashes+=("$clean_image:$source_hash→$pushed_hash")
+                  image_hashes+=("$clean_image:$source_hash->$pushed_hash")
                   ((success_count++))
                   
                   # Update audit entry
@@ -273,7 +273,10 @@ jobs:
 
       - name: 📊 Generate Job Summary
         if: always()
+        continue-on-error: true
         run: |
+          set +e  # Disable exit on error for summary generation
+          
           echo "# 🐳 Docker Images Update Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**🕐 Execution Time:** $(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)" >> $GITHUB_STEP_SUMMARY
@@ -342,16 +345,28 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Image | Source Hash | Pushed Hash |" >> $GITHUB_STEP_SUMMARY
             echo "|-------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
-            IFS=',' read -ra HASHES <<< "$image_hashes"
-            for hash_info in "${HASHES[@]}"; do
-              if [ -n "$hash_info" ] && [[ "$hash_info" == *":"* ]] && [[ "$hash_info" == *"→"* ]]; then
-                image_name=$(echo "$hash_info" | cut -d: -f1)
-                hash_pair=$(echo "$hash_info" | cut -d: -f2)
-                source_hash=$(echo "$hash_pair" | cut -d'→' -f1)
-                pushed_hash=$(echo "$hash_pair" | cut -d'→' -f2)
-                echo "| \`$image_name\` | \`$source_hash\` | \`$pushed_hash\` |" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
+            
+            # Try to parse hashes safely
+            if IFS=',' read -ra HASHES <<< "$image_hashes"; then
+              for hash_info in "${HASHES[@]}"; do
+                if [ -n "$hash_info" ]; then
+                  # Try parameter expansion method first
+                  if [[ "$hash_info" == *":"* ]] && [[ "$hash_info" == *"->"* ]]; then
+                    image_name="${hash_info%%:*}"
+                    hash_part="${hash_info#*:}"
+                    source_hash="${hash_part%%->*}"
+                    pushed_hash="${hash_part#*->}"
+                    echo "| \`$image_name\` | \`$source_hash\` | \`$pushed_hash\` |" >> $GITHUB_STEP_SUMMARY
+                  else
+                    # Fallback: just show the raw hash info
+                    echo "| \`$hash_info\` | Raw data | - |" >> $GITHUB_STEP_SUMMARY
+                  fi
+                fi
+              done
+            else
+              echo "| Error parsing | hash data | - |" >> $GITHUB_STEP_SUMMARY
+            fi
+            
             echo "</details>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
@@ -378,6 +393,9 @@ jobs:
             echo "- 🌐 Network connectivity to Docker Hub" >> $GITHUB_STEP_SUMMARY
             echo "- 📋 Detailed logs in the workflow run above" >> $GITHUB_STEP_SUMMARY
           fi
+          
+          # Ensure summary generation always succeeds
+          exit 0
 
       - name: 📤 Upload Audit File
         if: always() && steps.update_images.outputs.audit_file != ''
