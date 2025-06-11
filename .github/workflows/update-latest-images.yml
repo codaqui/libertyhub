@@ -1,4 +1,4 @@
-name: Update Latest Images
+name: 🐳 Update Latest Images
 
 on:
   schedule:
@@ -13,54 +13,250 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
+      - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: 🔐 Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List all images tagged with 'latest'
+      - name: 📋 List all images tagged with 'latest'
         id: list_latest_images
         env:
           GH_TOKEN: ${{ secrets.GH_PACKAGES_CODAQUI_TOKEN }}
         run: |
-          # List all container packages in the organization
-          echo "Trying to list packages..."
+          echo "::group::🔍 Discovering container packages"
+          echo "📡 Fetching container packages from GitHub API..."
           gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "/orgs/codaqui/packages?package_type=container" > packages.json
+          
           ghcr_images=$(cat packages.json | jq -r '.[] | select(.name | startswith("dockerhub-")) | .name')
-          echo "Found images: $ghcr_images"
+          image_count=$(echo "$ghcr_images" | wc -l)
+          
+          echo "✅ Found $image_count dockerhub images:"
+          echo "$ghcr_images" | sed 's/^/  📦 /'
+          echo "::endgroup::"
+          
           echo "images<<EOF" >> $GITHUB_OUTPUT
           echo "$ghcr_images" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "image_count=$image_count" >> $GITHUB_OUTPUT
 
-      - name: Update each 'latest' image
+      - name: 🔄 Update each 'latest' image
+        id: update_images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Initialize counters and arrays for summary
+          success_count=0
+          failed_count=0
+          declare -a successful_images=()
+          declare -a failed_images=()
+          declare -a image_hashes=()
+          
+          # Create audit file
+          audit_file="image_update_audit_$(date +%Y%m%d_%H%M%S).json"
+          echo "📝 Creating audit file: $audit_file"
+          echo '{"timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "workflow_run": "'${{ github.run_id }}'", "images": []}' > "$audit_file"
+          
           images=(
             ${{ steps.list_latest_images.outputs.images }}
           )
+          
+          total_images=${#images[@]}
+          current_image=0
+          
+          echo "🚀 Starting update process for $total_images images..."
+          echo "::group::📊 Processing Summary"
+          echo "Total images to process: $total_images"
+          echo "::endgroup::"
+          
           for image in "${images[@]}"; do
-            echo "Processing image: $image"
-
+            ((current_image++))
+            echo "::group::🐳 [$current_image/$total_images] Processing: $image"
+            
             # Remove the 'dockerhub-' prefix from the image name
-            image=${image#dockerhub-}
-            echo "Image name without prefix: $image"
-
-            # Pull the latest image from Docker Hub
-            docker pull "docker.io/$image:latest"
-
-            # Tag the image for GitHub Packages
-            image_name_push="dockerhub-$image"
-            docker tag "docker.io/$image:latest" "ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
-
-            # Push the image to GitHub Packages
-            docker push "ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
+            clean_image=${image#dockerhub-}
+            echo "🏷️  Original name: $image"
+            echo "🔧 Clean name: $clean_image"
+            
+            # Initialize image audit entry
+            image_audit='{"name": "'$clean_image'", "status": "processing", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "", "hashes": {}}'
+            
+            # Try to pull the image with fallback logic
+            pull_success=false
+            pull_method=""
+            
+            echo "📥 Attempting to pull image from Docker Hub..."
+            if docker pull "docker.io/$clean_image:latest" 2>/dev/null; then
+              echo "✅ Successfully pulled using standard format: docker.io/$clean_image:latest"
+              pull_success=true
+              pull_method="standard"
+            else
+              echo "⚠️  Standard format failed, trying repetitive format..."
+              if docker pull "docker.io/$clean_image/$clean_image:latest" 2>/dev/null; then
+                echo "✅ Successfully pulled using repetitive format: docker.io/$clean_image/$clean_image:latest"
+                echo "🔗 Creating alias tag for consistency..."
+                docker tag "docker.io/$clean_image/$clean_image:latest" "docker.io/$clean_image:latest"
+                pull_success=true
+                pull_method="repetitive"
+              else
+                echo "❌ Both pull methods failed for $clean_image"
+                pull_success=false
+              fi
+            fi
+            
+            if [ "$pull_success" = true ]; then
+              # Get image hash for audit
+              source_hash=$(docker inspect "docker.io/$clean_image:latest" --format='{{.Id}}' | cut -d: -f2 | head -c 12)
+              echo "🔐 Source image hash: $source_hash"
+              
+              # Tag the image for GitHub Packages
+              image_name_push="dockerhub-$clean_image"
+              ghcr_tag="ghcr.io/${{ github.repository_owner }}/$image_name_push:latest"
+              
+              echo "🏷️  Tagging for GHCR: $ghcr_tag"
+              docker tag "docker.io/$clean_image:latest" "$ghcr_tag"
+              
+              # Push the image to GitHub Packages
+              echo "📤 Pushing to GitHub Container Registry..."
+              if docker push "$ghcr_tag"; then
+                # Get pushed image hash
+                pushed_hash=$(docker inspect "$ghcr_tag" --format='{{.Id}}' | cut -d: -f2 | head -c 12)
+                echo "✅ Successfully pushed to GHCR"
+                echo "🔐 Pushed image hash: $pushed_hash"
+                
+                successful_images+=("$clean_image")
+                image_hashes+=("$clean_image:$source_hash→$pushed_hash")
+                ((success_count++))
+                
+                # Update audit entry
+                image_audit='{"name": "'$clean_image'", "status": "success", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "hashes": {"source": "'$source_hash'", "pushed": "'$pushed_hash'"}}'
+              else
+                echo "❌ Failed to push to GHCR"
+                failed_images+=("$clean_image (push failed)")
+                ((failed_count++))
+                image_audit='{"name": "'$clean_image'", "status": "push_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "hashes": {"source": "'$source_hash'"}}'
+              fi
+            else
+              echo "❌ Skipping $clean_image due to pull failure"
+              failed_images+=("$clean_image (pull failed)")
+              ((failed_count++))
+              image_audit='{"name": "'$clean_image'", "status": "pull_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "none", "hashes": {}}'
+            fi
+            
+            # Add to audit file
+            temp_audit=$(mktemp)
+            jq --argjson entry "$image_audit" '.images += [$entry]' "$audit_file" > "$temp_audit" && mv "$temp_audit" "$audit_file"
+            
+            echo "::endgroup::"
           done
+          
+          # Save results for summary
+          echo "success_count=$success_count" >> $GITHUB_OUTPUT
+          echo "failed_count=$failed_count" >> $GITHUB_OUTPUT
+          echo "audit_file=$audit_file" >> $GITHUB_OUTPUT
+          
+          # Create arrays output for summary
+          printf -v successful_images_str '%s,' "${successful_images[@]}"
+          printf -v failed_images_str '%s,' "${failed_images[@]}"
+          printf -v image_hashes_str '%s,' "${image_hashes[@]}"
+          
+          echo "successful_images=${successful_images_str%,}" >> $GITHUB_OUTPUT
+          echo "failed_images=${failed_images_str%,}" >> $GITHUB_OUTPUT
+          echo "image_hashes=${image_hashes_str%,}" >> $GITHUB_OUTPUT
+          
+          echo "::group::📈 Final Results"
+          echo "✅ Successful: $success_count"
+          echo "❌ Failed: $failed_count"
+          echo "📋 Total: $total_images"
+          echo "::endgroup::"
+
+      - name: 📊 Generate Job Summary
+        if: always()
+        run: |
+          echo "# 🐳 Docker Images Update Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**🕐 Execution Time:** $(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)" >> $GITHUB_STEP_SUMMARY
+          echo "**🔄 Workflow Run:** [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Statistics
+          echo "## 📈 Statistics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Total Images | ${{ steps.list_latest_images.outputs.image_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Successful | ${{ steps.update_images.outputs.success_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ Failed | ${{ steps.update_images.outputs.failed_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Success rate calculation
+          if [ "${{ steps.list_latest_images.outputs.image_count }}" -gt 0 ]; then
+            success_rate=$(( ${{ steps.update_images.outputs.success_count }} * 100 / ${{ steps.list_latest_images.outputs.image_count }} ))
+            echo "**📊 Success Rate:** ${success_rate}%" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Successful images
+          if [ "${{ steps.update_images.outputs.success_count }}" -gt 0 ]; then
+            echo "## ✅ Successfully Updated Images" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            IFS=',' read -ra SUCCESSFUL <<< "${{ steps.update_images.outputs.successful_images }}"
+            for img in "${SUCCESSFUL[@]}"; do
+              echo "- 🐳 \`$img\`" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Failed images
+          if [ "${{ steps.update_images.outputs.failed_count }}" -gt 0 ]; then
+            echo "## ❌ Failed Images" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            IFS=',' read -ra FAILED <<< "${{ steps.update_images.outputs.failed_images }}"
+            for img in "${FAILED[@]}"; do
+              echo "- 🚫 \`$img\`" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Audit hashes
+          if [ -n "${{ steps.update_images.outputs.image_hashes }}" ]; then
+            echo "## 🔐 Image Hashes (Audit Trail)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Click to expand hash information</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Image | Source Hash | Pushed Hash |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
+            IFS=',' read -ra HASHES <<< "${{ steps.update_images.outputs.image_hashes }}"
+            for hash_info in "${HASHES[@]}"; do
+              image_name=$(echo "$hash_info" | cut -d: -f1)
+              hash_pair=$(echo "$hash_info" | cut -d: -f2)
+              source_hash=$(echo "$hash_pair" | cut -d'→' -f1)
+              pushed_hash=$(echo "$hash_pair" | cut -d'→' -f2)
+              echo "| \`$image_name\` | \`$source_hash\` | \`$pushed_hash\` |" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Audit file info
+          echo "## 📋 Audit Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **📝 Audit File:** \`${{ steps.update_images.outputs.audit_file }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔍 Full audit trail available in workflow logs**" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📤 Upload Audit File
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-update-audit-${{ github.run_id }}
+          path: ${{ steps.update_images.outputs.audit_file }}
+          retention-days: 90
