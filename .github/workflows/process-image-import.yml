@@ -151,6 +151,41 @@ jobs:
               🚀 Starting import process. Please wait...`
             });
 
+      - name: ⚠️ Validate organization name
+        if: steps.extract_data.outputs.isOfficial != 'true' && contains(steps.extract_data.outputs.repo, '-')
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **Error: Organization name with hyphen not supported**\\n\\n' +
+                    '**Organization**: `' + process.env.SOURCE_REPO + '`\\n' +
+                    '**Image**: `' + process.env.IMAGE_NAME + '`\\n\\n' +
+                    '**Issue**: Organization names with hyphens are not supported due to naming conflicts in the `dockerhub-<org>-<image>` pattern.\\n\\n' +
+                    '**Recommended Solutions:**\\n' +
+                    '1. Use official images when possible\\n' +
+                    '2. Choose organizations without hyphens in the name\\n' +
+                    '3. Contact maintainers for alternative solutions\\n\\n' +
+                    '**Technical Details:**\\n' +
+                    '- Target would be: `dockerhub-' + process.env.SOURCE_REPO + '-' + process.env.IMAGE_NAME + '`\\n' +
+                    '- This creates ambiguity in reverse mapping for automatic updates\\n' +
+                    '- System prioritizes reliable automation over edge case support'
+            });
+            
+            await github.rest.issues.addLabels({
+              issue_number: context.payload.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['invalid', 'naming-conflict']
+            });
+            
+            core.setFailed('Organization name contains hyphen - not supported');
+        env:
+          SOURCE_REPO: ${{ steps.extract_data.outputs.repo }}
+          IMAGE_NAME: ${{ steps.extract_data.outputs.image }}
+
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -196,48 +231,10 @@ jobs:
             
             # IMPORTANT: Check for hyphen in organization name (incompatible)
             if [[ "$SOURCE_REPO" == *"-"* ]]; then
-              echo "❌ **ERROR: Organization name contains hyphen**"
-              echo ""
-              echo "Organization: \`$SOURCE_REPO\`"
-              echo "Image: \`$IMAGE_NAME\`"
-              echo ""
-              echo "**Issue**: Organization names with hyphens are not supported due to naming conflicts in the \`dockerhub-<org>-<image>\` pattern."
-              echo ""
-              echo "**Recommended Solutions:**"
-              echo "1. Use the full image name format: \`$SOURCE_REPO/$IMAGE_NAME\`"
-              echo "2. Contact the repository maintainer to discuss alternatives"
-              echo ""
-              echo "**Technical Details:**"
-              echo "- Target pattern would be: \`dockerhub-$SOURCE_REPO-$IMAGE_NAME\`"
-              echo "- This creates ambiguity in reverse mapping for automatic updates"
-              echo "- Current system prioritizes reliable automation over edge case support"
-              
-              await github.rest.issues.createComment({
-                issue_number: issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: '❌ **Error: Organization name with hyphen not supported**\\n\\n' +
-                      '**Organization**: `' + process.env.SOURCE_REPO + '`\\n' +
-                      '**Image**: `' + process.env.IMAGE_NAME + '`\\n\\n' +
-                      '**Issue**: Organization names with hyphens are not supported due to naming conflicts in the `dockerhub-<org>-<image>` pattern.\\n\\n' +
-                      '**Recommended Solutions:**\\n' +
-                      '1. Use official images when possible\\n' +
-                      '2. Choose organizations without hyphens in the name\\n' +
-                      '3. Contact maintainers for alternative solutions\\n\\n' +
-                      '**Technical Details:**\\n' +
-                      '- Target would be: `dockerhub-' + process.env.SOURCE_REPO + '-' + process.env.IMAGE_NAME + '`\\n' +
-                      '- This creates ambiguity in reverse mapping for automatic updates\\n' +
-                      '- System prioritizes reliable automation over edge case support'
-              });
-              
-              await github.rest.issues.addLabels({
-                issue_number: issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                labels: ['invalid', 'naming-conflict']
-              });
-              
-              return core.setFailed('Organization name contains hyphen - not supported');
+              echo "❌ ERROR: Organization name contains hyphen: $SOURCE_REPO"
+              echo "Organization names with hyphens are not supported due to naming conflicts."
+              echo "::error::Organization name '$SOURCE_REPO' contains hyphen - not supported"
+              exit 1
             fi
             
             ORG_NAME=$(echo "$SOURCE_REPO" | sed 's/[^a-zA-Z0-9._]/-/g')
