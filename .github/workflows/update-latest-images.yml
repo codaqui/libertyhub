@@ -124,10 +124,10 @@ jobs:
             ((current_image++))
             echo "::group::🐳 [$current_image/$total_images] Processing: $image"
             
-            # Remove the 'dockerhub-' prefix from the image name
+            # Simplified reverse mapping for Docker Hub image reconstruction
             clean_image=${image#dockerhub-}
-            echo "🏷️  Original name: $image"
-            echo "🔧 Clean name: $clean_image"
+            echo "🏷️  GHCR name: $image"
+            echo "🔧 After prefix removal: $clean_image"
             
             # Skip if clean_image is empty
             if [ -z "$clean_image" ]; then
@@ -136,35 +136,77 @@ jobs:
               continue
             fi
             
-            # Initialize image audit entry
-            image_audit='{"name": "'$clean_image'", "status": "processing", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "", "hashes": {}}'
+            # Simple strategy: Try the most common patterns with fallback for legacy images
+            strategies=()
             
-            # Try to pull the image with fallback logic
+            # Strategy 1: Check if it looks like org-image pattern (contains exactly one hyphen)
+            if [[ "$clean_image" =~ ^([a-zA-Z0-9._]+)-([a-zA-Z0-9._-]+)$ ]]; then
+              org_part="${BASH_REMATCH[1]}"
+              image_part="${BASH_REMATCH[2]}"
+              echo "🎯 Detected org-image pattern: $org_part/$image_part"
+              strategies+=("$org_part/$image_part")
+            fi
+            
+            # Strategy 2: Try as single image name (official images)
+            strategies+=("$clean_image")
+            
+            # Strategy 3: Legacy fallback - repetitive format (old imports)
+            strategies+=("$clean_image/$clean_image")
+            
+            echo "🎯 Will try ${#strategies[@]} strategies:"
+            for i in "${!strategies[@]}"; do
+              echo "   $((i+1)). docker.io/${strategies[$i]}:latest"
+            done
+            
+            # Initialize image audit entry
+            image_audit='{"name": "'$clean_image'", "status": "processing", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "strategies_count": '${#strategies[@]}', "pull_method": "", "hashes": {}}'
+            
+            # Try to pull the image with multiple strategies
             pull_success=false
             pull_method=""
+            successful_strategy=""
             
-            echo "📥 Attempting to pull image from Docker Hub..."
+            echo "📥 Attempting to pull image from Docker Hub using multiple strategies..."
             
-            # Try standard format first
-            if docker pull "docker.io/$clean_image:latest" >/dev/null 2>&1; then
-              echo "✅ Successfully pulled using standard format: docker.io/$clean_image:latest"
-              pull_success=true
-              pull_method="standard"
-            else
-              echo "⚠️  Standard format failed, trying repetitive format..."
-              # Try repetitive format
+            # Try each strategy in order
+            for strategy in "${strategies[@]}"; do
+              echo "🎯 Trying strategy: docker.io/$strategy:latest"
+              
+              if docker pull "docker.io/$strategy:latest" >/dev/null 2>&1; then
+                echo "✅ Successfully pulled using strategy: docker.io/$strategy:latest"
+                docker_hub_image="$strategy"
+                pull_success=true
+                pull_method="strategy_$strategy"
+                successful_strategy="$strategy"
+                
+                # Tag with a consistent name for further processing
+                if [ "$strategy" != "$clean_image" ]; then
+                  echo "🔗 Creating alias tag for consistency..."
+                  docker tag "docker.io/$strategy:latest" "docker.io/$clean_image:latest"
+                fi
+                break
+              else
+                echo "❌ Strategy failed: docker.io/$strategy:latest"
+              fi
+            done
+            
+            # If all strategies failed, try the old repetitive format as final fallback
+            if [ "$pull_success" = false ]; then
+              echo "⚠️  All strategies failed, trying legacy repetitive format..."
               if docker pull "docker.io/$clean_image/$clean_image:latest" >/dev/null 2>&1; then
                 echo "✅ Successfully pulled using repetitive format: docker.io/$clean_image/$clean_image:latest"
                 echo "🔗 Creating alias tag for consistency..."
                 if docker tag "docker.io/$clean_image/$clean_image:latest" "docker.io/$clean_image:latest" >/dev/null 2>&1; then
+                  docker_hub_image="$clean_image/$clean_image"
                   pull_success=true
                   pull_method="repetitive"
+                  successful_strategy="$clean_image/$clean_image"
                 else
                   echo "❌ Failed to create alias tag"
                   pull_success=false
                 fi
               else
-                echo "❌ Both pull methods failed for $clean_image"
+                echo "❌ All pull methods failed for $clean_image"
                 pull_success=false
               fi
             fi
@@ -176,6 +218,8 @@ jobs:
                 source_hash="unknown"
               fi
               echo "🔐 Source image hash: $source_hash"
+              echo "🎯 Successful strategy: $successful_strategy"
+              echo "📋 Original Docker Hub image: $docker_hub_image"
               
               # Check if we already have this image in GHCR to avoid unnecessary pushes
               image_name_push="dockerhub-$clean_image"
@@ -258,24 +302,24 @@ jobs:
                   ((success_count++))
                   
                   # Update audit entry
-                  image_audit='{"name": "'$clean_image'", "status": "success", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "hashes": {"source": "'$source_hash'", "pushed": "'$pushed_hash'"}}'
+                  image_audit='{"name": "'$clean_image'", "status": "success", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "docker_hub_image": "'$docker_hub_image'", "successful_strategy": "'$successful_strategy'", "hashes": {"source": "'$source_hash'", "pushed": "'$pushed_hash'"}}'
                 else
                   echo "❌ Failed to push to GHCR"
                   failed_images+=("$clean_image (push failed)")
                   ((failed_count++))
-                  image_audit='{"name": "'$clean_image'", "status": "push_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "hashes": {"source": "'$source_hash'"}}'
+                  image_audit='{"name": "'$clean_image'", "status": "push_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "docker_hub_image": "'$docker_hub_image'", "successful_strategy": "'$successful_strategy'", "hashes": {"source": "'$source_hash'"}}'
                 fi
               else
                 echo "❌ Failed to tag image for GHCR"
                 failed_images+=("$clean_image (tag failed)")
                 ((failed_count++))
-                image_audit='{"name": "'$clean_image'", "status": "tag_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "hashes": {"source": "'$source_hash'"}}'
+                image_audit='{"name": "'$clean_image'", "status": "tag_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "'$pull_method'", "docker_hub_image": "'$docker_hub_image'", "successful_strategy": "'$successful_strategy'", "hashes": {"source": "'$source_hash'"}}'
               fi
             else
               echo "❌ Skipping $clean_image due to pull failure"
               failed_images+=("$clean_image (pull failed)")
               ((failed_count++))
-              image_audit='{"name": "'$clean_image'", "status": "pull_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "none", "hashes": {}}'
+              image_audit='{"name": "'$clean_image'", "status": "pull_failed", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "pull_method": "none", "strategies_tried": ['$(printf '"%s",' "${strategies[@]}" | sed 's/,$//')]', "hashes": {}}'
             fi
             
             # Add to audit file
