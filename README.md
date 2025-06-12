@@ -1,8 +1,6 @@
 # 🚀 LibertyHub
 
-[![Image - **🚫 Duplicate Prevention**: System verifies if the requested image already exists before processing
-- **🔄 Execution Control**: Prevents duplicate workflow runs with smart event handling and state tracking
-- **🗂️ Image Mapping**: Advanced naming system to handle complex Docker Hub structuresuest](assets/image.png)](https://github.com/codaqui/libertyhub/issues/new/choose)
+[![Image Request](assets/image.png)](https://github.com/codaqui/libertyhub/issues/new/choose)
 
 Repository to release images from Docker Hub and securely republish them within GitHub Packages in an auditable and reliable manner.
 
